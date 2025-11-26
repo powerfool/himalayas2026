@@ -3,8 +3,22 @@
  */
 
 const ORS_API_BASE = 'https://api.openrouteservice.org/v2';
-// Using the public demo key - in production, you'd want to use your own API key
-const ORS_API_KEY = '5b3ce3597851110001cf6248e77b1b7896f64ec9baa4675982c65e35';
+
+/**
+ * Get OpenRouteService API key from environment variable
+ * Get your free API key from: https://openrouteservice.org/dev/#/signup
+ */
+function getORSAPIKey() {
+  const apiKey = import.meta.env.VITE_ORS_API_KEY;
+  
+  if (!apiKey) {
+    // Fallback to demo key (may have rate limits)
+    console.warn('VITE_ORS_API_KEY not set. Using demo key (may have rate limits). Get your free key at https://openrouteservice.org/dev/#/signup');
+    return '5b3ce3597851110001cf6248e77b1b7896f64ec9baa4675982c65e35';
+  }
+  
+  return apiKey;
+}
 
 /**
  * Geocode a location name to coordinates using Nominatim (OpenStreetMap)
@@ -55,10 +69,12 @@ export async function geocodeLocation(locationName, countryCode = 'IN', limit = 
  * Calculate route between two waypoints using OpenRouteService
  * @param {Object} from - Starting waypoint {lat, lng}
  * @param {Object} to - Ending waypoint {lat, lng}
- * @param {string} profile - Route profile (default: 'driving-motorcycle')
+ * @param {string} profile - Route profile (default: 'driving-car')
+ *   Valid profiles: 'driving-car', 'driving-hgv', 'cycling-regular', 'cycling-road', 
+ *   'cycling-mountain', 'cycling-electric', 'foot-walking', 'foot-hiking', 'wheelchair'
  * @returns {Promise<{polyline: Array<[number, number]>, distance: number, duration: number}>} Segment data
  */
-export async function calculateRoute(from, to, profile = 'driving-motorcycle') {
+export async function calculateRoute(from, to, profile = 'driving-car') {
   if (!from || !to) {
     throw new Error('Both from and to waypoints are required');
   }
@@ -73,23 +89,28 @@ export async function calculateRoute(from, to, profile = 'driving-motorcycle') {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': ORS_API_KEY
+        'Authorization': getORSAPIKey()
       },
       body: JSON.stringify({
         coordinates,
         format: 'geojson'
       })
     });
+    
+    console.log('OpenRouteService request:', { url, coordinates, profile });
+    console.log('OpenRouteService response status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Routing failed: ${response.status} - ${errorText}`);
+      console.error('OpenRouteService API error:', response.status, errorText);
+      throw new Error(`Routing failed (${response.status}): ${errorText.substring(0, 200)}`);
     }
 
     const data = await response.json();
     
     if (!data.features || data.features.length === 0) {
-      throw new Error('No route found');
+      console.error('No route features in response:', data);
+      throw new Error('No route found between these waypoints');
     }
 
     // Extract coordinates from GeoJSON LineString
@@ -121,7 +142,7 @@ export async function calculateRoute(from, to, profile = 'driving-motorcycle') {
  * @param {Function} onProgress - Optional progress callback: (current, total) => void
  * @returns {Promise<Array<{fromWaypointId: string, toWaypointId: string, polyline: Array, distance: number, duration: number}>>} Array of segments
  */
-export async function calculateRouteSegments(waypoints, profile = 'driving-motorcycle', onProgress = null) {
+export async function calculateRouteSegments(waypoints, profile = 'foot-walking', onProgress = null) {
   if (!waypoints || waypoints.length < 2) {
     throw new Error('At least 2 waypoints are required');
   }

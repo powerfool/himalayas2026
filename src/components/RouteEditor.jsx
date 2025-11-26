@@ -224,7 +224,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
     try {
       const routeSegments = await calculateRouteSegments(
         geocodedWaypoints,
-        'driving-motorcycle',
+        'foot-walking', // Using foot-walking profile for remote Himalayan routes
         (current, total) => {
           setGeocodingProgress({ current, total });
         }
@@ -237,6 +237,18 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
         return;
       }
 
+      console.log('Route segments calculated:', routeSegments);
+      console.log('Number of segments:', routeSegments.length);
+      routeSegments.forEach((seg, idx) => {
+        console.log(`Segment ${idx}:`, {
+          from: seg.fromWaypointId,
+          to: seg.toWaypointId,
+          polylineLength: seg.polyline?.length || 0,
+          firstPoint: seg.polyline?.[0],
+          lastPoint: seg.polyline?.[seg.polyline?.length - 1]
+        });
+      });
+      
       setSegments(routeSegments);
       
       // Generate combined polyline for backward compatibility
@@ -247,12 +259,22 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
       setGeocodingProgress({ current: 0, total: 0 });
       
       if (routeSegments.length < geocodedWaypoints.length - 1) {
-        setError(`Warning: Only ${routeSegments.length} of ${geocodedWaypoints.length - 1} segments calculated successfully`);
+        setError(`Warning: Only ${routeSegments.length} of ${geocodedWaypoints.length - 1} segments calculated successfully. Some segments may be missing.`);
+      } else {
+        // Show success message
+        setError(null);
+        // Clear any previous error after a short delay to show success
+        setTimeout(() => {
+          // Success - segments calculated
+        }, 100);
       }
     } catch (err) {
-      setError(`Error calculating route: ${err.message}`);
+      console.error('Route calculation error:', err);
+      setError(`Error calculating route: ${err.message}. Check browser console for details.`);
       setLoading(false);
       setGeocodingProgress({ current: 0, total: 0 });
+      setSegments([]); // Clear segments on error
+      setRoutePolyline([]);
     }
   };
 
@@ -381,8 +403,23 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
           >
             {loading && geocodingProgress.total > 0
               ? `Calculating... (${geocodingProgress.current}/${geocodingProgress.total} segments)`
+              : segments.length > 0
+              ? `Recalculate Route (${segments.length} segments)`
               : 'Calculate Route'}
           </button>
+          
+          {segments.length > 0 && !loading && (
+            <div style={{
+              marginTop: '8px',
+              padding: '8px',
+              backgroundColor: '#d1fae5',
+              color: '#065f46',
+              borderRadius: '4px',
+              fontSize: '12px'
+            }}>
+              ✓ Route calculated: {segments.length} segment{segments.length !== 1 ? 's' : ''} displayed on map
+            </div>
+          )}
 
           <button
             onClick={handleSave}

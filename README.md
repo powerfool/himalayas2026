@@ -23,8 +23,16 @@ A local web application for planning and visualizing motorbike routes in the Ind
 ## Setup
 
 **Required API Keys:**
-- Anthropic API key (for Phase 1): Get from https://console.anthropic.com/
-- Create `.env.local` file with: `VITE_ANTHROPIC_API_KEY=your_key_here`
+- **Anthropic API key**: Get from https://console.anthropic.com/
+- **OpenRouteService API key**: Get free key from https://openrouteservice.org/dev/#/signup
+
+Create `.env.local` file with:
+```
+VITE_ANTHROPIC_API_KEY=your_anthropic_key_here
+VITE_ORS_API_KEY=your_ors_key_here
+```
+
+**Note:** If you don't set `VITE_ORS_API_KEY`, the app will use a demo key (may have rate limits).
 
 ## Features
 

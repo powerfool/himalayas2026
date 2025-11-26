@@ -64,6 +64,24 @@ export default function MapView({ waypoints = [], routePolyline = [], segments =
   // Default center: Indian Himalayas region (around Manali)
   const defaultCenter = [32.2432, 77.1892];
   const defaultZoom = 7;
+  
+  // Debug logging
+  useEffect(() => {
+    if (segments && segments.length > 0) {
+      console.log('MapView received segments:', segments.length);
+      segments.forEach((seg, idx) => {
+        console.log(`Segment ${idx}:`, {
+          from: seg.fromWaypointId,
+          to: seg.toWaypointId,
+          polylinePoints: seg.polyline?.length || 0
+        });
+      });
+    } else if (routePolyline && routePolyline.length > 0) {
+      console.log('MapView using routePolyline (fallback):', routePolyline.length, 'points');
+    } else {
+      console.log('MapView: No route data to display');
+    }
+  }, [segments, routePolyline]);
 
   // Color palette for segments (cycling through colors)
   const segmentColors = [
@@ -117,15 +135,35 @@ export default function MapView({ waypoints = [], routePolyline = [], segments =
         
         {/* Display route segments (if available) */}
         {segments && segments.length > 0 ? (
-          segments.map((segment, index) => (
-            <Polyline
-              key={`segment-${index}`}
-              positions={segment.polyline}
-              color={segmentColors[index % segmentColors.length]}
-              weight={4}
-              opacity={0.7}
-            />
-          ))
+          segments.map((segment, index) => {
+            // Validate segment has polyline data
+            if (!segment.polyline || segment.polyline.length === 0) {
+              console.warn(`Segment ${index} has no polyline data:`, segment);
+              return null;
+            }
+            // Ensure polyline is array of [lat, lng] pairs
+            const validPolyline = segment.polyline.filter(coord => 
+              Array.isArray(coord) && coord.length === 2 && 
+              typeof coord[0] === 'number' && typeof coord[1] === 'number'
+            );
+            
+            if (validPolyline.length === 0) {
+              console.warn(`Segment ${index} has no valid coordinates:`, segment.polyline);
+              return null;
+            }
+            
+            console.log(`Rendering segment ${index} with ${validPolyline.length} points, color: ${segmentColors[index % segmentColors.length]}`);
+            
+            return (
+              <Polyline
+                key={`segment-${index}-${segment.fromWaypointId}-${segment.toWaypointId}`}
+                positions={validPolyline}
+                color={segmentColors[index % segmentColors.length]}
+                weight={4}
+                opacity={0.7}
+              />
+            );
+          })
         ) : (
           /* Fallback to single polyline for backward compatibility */
           routePolyline && routePolyline.length > 0 && (
@@ -143,21 +181,29 @@ export default function MapView({ waypoints = [], routePolyline = [], segments =
           .filter(wp => wp.lat !== 0 && wp.lng !== 0)
           .sort((a, b) => (a.order || 0) - (b.order || 0))
           .map((waypoint, index) => {
-            const sequenceNumber = index + 1;
+            // Use order + 1 for sequence number (order is 0-based)
+            const sequenceNumber = (waypoint.order !== undefined ? waypoint.order : index) + 1;
+            console.log(`Rendering waypoint marker ${sequenceNumber}: ${waypoint.name} at [${waypoint.lat}, ${waypoint.lng}]`);
             return (
               <Marker
-                key={waypoint.id || waypoint.order || index}
+                key={waypoint.id || `wp-${waypoint.order}-${index}`}
                 position={[waypoint.lat, waypoint.lng]}
                 icon={createNumberedIcon(sequenceNumber)}
               >
                 <Popup>
                   <div>
                     <strong>{waypoint.name}</strong>
+                    <div style={{ fontSize: '0.85em', color: '#666', marginTop: '4px' }}>
+                      Waypoint {sequenceNumber}
+                    </div>
                     {waypoint.display_name && waypoint.display_name !== waypoint.name && (
                       <div style={{ fontSize: '0.85em', color: '#666', marginTop: '4px' }}>
                         {waypoint.display_name}
                       </div>
                     )}
+                    <div style={{ fontSize: '0.85em', color: '#666', marginTop: '4px' }}>
+                      {waypoint.lat.toFixed(4)}, {waypoint.lng.toFixed(4)}
+                    </div>
                   </div>
                 </Popup>
               </Marker>

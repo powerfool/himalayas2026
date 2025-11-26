@@ -4,6 +4,46 @@
 
 const ORS_API_BASE = 'https://api.openrouteservice.org/v2';
 
+/**
+ * Decode an encoded polyline string to coordinates
+ * @param {string} encoded - Encoded polyline string
+ * @returns {Array<[number, number]>} Array of [lng, lat] coordinates
+ */
+function decodePolyline(encoded) {
+  const coordinates = [];
+  let index = 0;
+  const len = encoded.length;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < len) {
+    let b;
+    let shift = 0;
+    let result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlat = ((result & 1) !== 0) ? ~(result >> 1) : (result >> 1);
+    lat += dlat;
+
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlng = ((result & 1) !== 0) ? ~(result >> 1) : (result >> 1);
+    lng += dlng;
+
+    coordinates.push([lng / 1e5, lat / 1e5]);
+  }
+
+  return coordinates;
+}
+
 // Default routing profile for Himalayan routes
 // Valid profiles: 'driving-car', 'driving-hgv', 'cycling-regular', 'cycling-road', 
 // 'cycling-mountain', 'cycling-electric', 'foot-walking', 'foot-hiking', 'wheelchair'
@@ -113,21 +153,48 @@ export async function calculateRoute(from, to, profile = DEFAULT_ROUTING_PROFILE
 
     const data = await response.json();
     
-    if (!data.features || data.features.length === 0) {
-      console.error('No route features in response:', data);
+    let coordinatesArray;
+    let distance = 0;
+    let duration = 0;
+    
+    // Handle both GeoJSON and JSON response formats
+    if (data.features && data.features.length > 0) {
+      // GeoJSON format
+      coordinatesArray = data.features[0].geometry.coordinates;
+      const properties = data.features[0].properties || {};
+      distance = properties.segments?.[0]?.distance || 0;
+      duration = properties.segments?.[0]?.duration || 0;
+    } else if (data.routes && data.routes.length > 0) {
+      // JSON format with encoded polyline
+      const route = data.routes[0];
+      const geometry = route.geometry;
+      
+      if (typeof geometry === 'string') {
+        // Decode encoded polyline
+        coordinatesArray = decodePolyline(geometry);
+      } else if (Array.isArray(geometry)) {
+        // Already decoded coordinates
+        coordinatesArray = geometry;
+      } else {
+        console.error('Unexpected geometry format:', geometry);
+        throw new Error('Unexpected route geometry format');
+      }
+      
+      // Extract distance and duration from route summary or segments
+      if (route.summary) {
+        distance = route.summary.distance || 0;
+        duration = route.summary.duration || 0;
+      } else if (route.segments && route.segments.length > 0) {
+        distance = route.segments[0].distance || 0;
+        duration = route.segments[0].duration || 0;
+      }
+    } else {
+      console.error('No route data in response:', data);
       throw new Error('No route found between these waypoints');
     }
-
-    // Extract coordinates from GeoJSON LineString
-    const coordinatesArray = data.features[0].geometry.coordinates;
     
     // Convert from [lng, lat] to [lat, lng] for Leaflet
     const polyline = coordinatesArray.map(coord => [coord[1], coord[0]]);
-    
-    // Extract distance and duration from route properties
-    const properties = data.features[0].properties || {};
-    const distance = properties.segments?.[0]?.distance || 0; // meters
-    const duration = properties.segments?.[0]?.duration || 0; // seconds
     
     return {
       polyline,

@@ -209,6 +209,74 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
     setGeocodingProgress({ current: 0, total: 0 });
   };
 
+  const handleAmbiguitySearch = async (newName) => {
+    if (!ambiguityState || !newName.trim()) return;
+    
+    setLoading(true);
+    
+    try {
+      // Update the waypoint name with the new search term
+      const updatedWaypoints = [...waypoints];
+      updatedWaypoints[ambiguityState.waypointIndex] = {
+        ...updatedWaypoints[ambiguityState.waypointIndex],
+        name: newName.trim()
+      };
+      setWaypoints(updatedWaypoints);
+      
+      // Try geocoding with the new name
+      const result = await geocodeLocation(newName.trim());
+      
+      // Check results and update ambiguity state
+      if (result.candidates.length === 0) {
+        // Still no results - show manual entry option
+        setAmbiguityState({
+          waypointIndex: ambiguityState.waypointIndex,
+          waypointName: newName.trim(),
+          candidates: []
+        });
+        setLoading(false);
+      } else if (result.candidates.length === 1) {
+        // Single result - use it automatically
+        updatedWaypoints[ambiguityState.waypointIndex] = {
+          ...updatedWaypoints[ambiguityState.waypointIndex],
+          lat: result.candidates[0].lat,
+          lng: result.candidates[0].lng,
+          display_name: result.candidates[0].display_name
+        };
+        setWaypoints(updatedWaypoints);
+        setAmbiguityState(null);
+        
+        // Continue geocoding remaining waypoints
+        const remaining = updatedWaypoints.filter(wp => wp.lat === 0 && wp.lng === 0);
+        if (remaining.length > 0) {
+          setTimeout(() => {
+            handleGeocodeWaypoints();
+          }, 100);
+        } else {
+          setLoading(false);
+          setGeocodingProgress({ current: 0, total: 0 });
+        }
+      } else {
+        // Multiple candidates - show them
+        setAmbiguityState({
+          waypointIndex: ambiguityState.waypointIndex,
+          waypointName: newName.trim(),
+          candidates: result.candidates
+        });
+        setLoading(false);
+      }
+    } catch (err) {
+      console.error(`Error geocoding "${newName}":`, err);
+      // Show manual entry for failed geocoding
+      setAmbiguityState({
+        waypointIndex: ambiguityState.waypointIndex,
+        waypointName: newName.trim(),
+        candidates: []
+      });
+      setLoading(false);
+    }
+  };
+
   const handleCalculateRoute = async () => {
     const geocodedWaypoints = waypoints.filter(wp => wp.lat !== 0 && wp.lng !== 0);
     
@@ -458,6 +526,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
           onSelect={handleAmbiguityResolve}
           onSkip={handleAmbiguitySkip}
           onCancel={handleAmbiguityCancel}
+          onSearch={handleAmbiguitySearch}
         />
       )}
     </div>

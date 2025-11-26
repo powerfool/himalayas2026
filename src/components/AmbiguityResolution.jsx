@@ -10,16 +10,20 @@ import { useState } from 'react';
  * @param {Function} props.onSelect - Callback when user selects a candidate: (candidate) => void
  * @param {Function} props.onSkip - Callback when user wants to skip: () => void
  * @param {Function} props.onCancel - Callback to cancel/close: () => void
+ * @param {Function} props.onSearch - Callback to search with a different name: (newName) => void
  */
 export default function AmbiguityResolution({
   waypointName,
   candidates = [],
   onSelect,
   onSkip,
-  onCancel
+  onCancel,
+  onSearch
 }) {
   const [manualCoords, setManualCoords] = useState({ lat: '', lng: '' });
   const [showManualEntry, setShowManualEntry] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchName, setSearchName] = useState('');
 
   const handleManualSubmit = () => {
     const lat = parseFloat(manualCoords.lat);
@@ -66,10 +70,12 @@ export default function AmbiguityResolution({
         boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
       }}>
         <h3 style={{ marginTop: 0, marginBottom: '16px' }}>
-          Multiple locations found for "{waypointName}"
+          {candidates.length > 0 
+            ? `Multiple locations found for "${waypointName}"`
+            : `No locations found for "${waypointName}"`}
         </h3>
         
-        {!showManualEntry ? (
+        {!showManualEntry && !showSearch ? (
           <>
             {candidates.length > 0 ? (
               <>
@@ -110,12 +116,34 @@ export default function AmbiguityResolution({
                 </div>
               </>
             ) : (
-              <p style={{ marginBottom: '16px', color: '#ef4444' }}>
-                No locations found for "{waypointName}"
-              </p>
+              <>
+                <p style={{ marginBottom: '16px', color: '#ef4444' }}>
+                  No locations found for "{waypointName}"
+                </p>
+                <p style={{ marginBottom: '16px', color: '#6b7280', fontSize: '14px' }}>
+                  Try searching with a different name, or enter coordinates manually.
+                </p>
+              </>
             )}
             
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {candidates.length === 0 && onSearch && (
+                <button
+                  onClick={() => setShowSearch(true)}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '14px'
+                  }}
+                >
+                  Search with Different Name
+                </button>
+              )}
+              
               <button
                 onClick={() => setShowManualEntry(true)}
                 style={{
@@ -164,7 +192,7 @@ export default function AmbiguityResolution({
               </button>
             </div>
           </>
-        ) : (
+        ) : showManualEntry ? (
           <div>
             <h4 style={{ marginTop: 0, marginBottom: '12px' }}>Manual Coordinate Entry</h4>
             <p style={{ marginBottom: '16px', color: '#6b7280', fontSize: '14px' }}>
@@ -234,6 +262,75 @@ export default function AmbiguityResolution({
               
               <button
                 onClick={() => setShowManualEntry(false)}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#6b7280',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                Back
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <h4 style={{ marginTop: 0, marginBottom: '12px' }}>Search with Different Name</h4>
+            <p style={{ marginBottom: '16px', color: '#6b7280', fontSize: '14px' }}>
+              Original name: "{waypointName}". Enter an alternative name to search:
+            </p>
+            
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: '500' }}>
+                Location Name
+              </label>
+              <input
+                type="text"
+                value={searchName}
+                onChange={(e) => setSearchName(e.target.value)}
+                placeholder="e.g., Leh, Ladakh, India"
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter' && searchName.trim()) {
+                    onSearch(searchName.trim());
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  boxSizing: 'border-box'
+                }}
+                autoFocus
+              />
+            </div>
+            
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => onSearch(searchName.trim())}
+                disabled={!searchName.trim()}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: !searchName.trim() ? '#d1d5db' : '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: !searchName.trim() ? 'not-allowed' : 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                Search
+              </button>
+              
+              <button
+                onClick={() => {
+                  setShowSearch(false);
+                  setSearchName('');
+                }}
                 style={{
                   padding: '8px 16px',
                   backgroundColor: '#6b7280',

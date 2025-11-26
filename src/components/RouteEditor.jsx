@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { getRoute, saveRoute } from '../utils/storage';
 import { extractWaypointsWithRetry } from '../utils/anthropicService';
-import { geocodeLocation, calculateRoute } from '../utils/openRouteService';
+import { geocodeLocation, calculateRouteSegments } from '../utils/openRouteService';
 import RouteForm from './RouteForm';
 import WaypointEditor from './WaypointEditor';
 import MapView from './MapView';
@@ -15,7 +15,8 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
   const [routeName, setRouteName] = useState('');
   const [itineraryText, setItineraryText] = useState('');
   const [waypoints, setWaypoints] = useState([]);
-  const [routePolyline, setRoutePolyline] = useState([]);
+  const [routePolyline, setRoutePolyline] = useState([]); // Keep for backward compatibility
+  const [segments, setSegments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isNewRoute, setIsNewRoute] = useState(!routeId);
@@ -31,7 +32,8 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
           setRouteName(route.name || '');
           setItineraryText(route.itineraryText || '');
           setWaypoints(route.waypoints || []);
-          setRoutePolyline(route.routePolyline || []);
+          setRoutePolyline(route.routePolyline || []); // Backward compatibility
+          setSegments(route.segments || []);
           setIsNewRoute(false);
         } else {
           setError('Route not found');
@@ -67,6 +69,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
 
       // Convert to waypoint format (without coordinates yet - geocoding happens separately)
       const newWaypoints = extractedWaypoints.map((wp) => ({
+        id: uuidv4(), // Generate unique ID for each waypoint
         name: wp.name,
         lat: 0,
         lng: 0,
@@ -216,14 +219,40 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
 
     setLoading(true);
     setError(null);
+    setGeocodingProgress({ current: 0, total: geocodedWaypoints.length - 1 });
 
     try {
-      const polyline = await calculateRoute(geocodedWaypoints);
-      setRoutePolyline(polyline);
+      const routeSegments = await calculateRouteSegments(
+        geocodedWaypoints,
+        'driving-motorcycle',
+        (current, total) => {
+          setGeocodingProgress({ current, total });
+        }
+      );
+      
+      if (routeSegments.length === 0) {
+        setError('Failed to calculate any route segments');
+        setLoading(false);
+        setGeocodingProgress({ current: 0, total: 0 });
+        return;
+      }
+
+      setSegments(routeSegments);
+      
+      // Generate combined polyline for backward compatibility
+      const combinedPolyline = routeSegments.flatMap(segment => segment.polyline);
+      setRoutePolyline(combinedPolyline);
+      
       setLoading(false);
+      setGeocodingProgress({ current: 0, total: 0 });
+      
+      if (routeSegments.length < geocodedWaypoints.length - 1) {
+        setError(`Warning: Only ${routeSegments.length} of ${geocodedWaypoints.length - 1} segments calculated successfully`);
+      }
     } catch (err) {
       setError(`Error calculating route: ${err.message}`);
       setLoading(false);
+      setGeocodingProgress({ current: 0, total: 0 });
     }
   };
 
@@ -245,7 +274,8 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
         name: routeName.trim(),
         itineraryText: itineraryText.trim(),
         waypoints: waypoints,
-        routePolyline: routePolyline,
+        routePolyline: routePolyline, // Keep for backward compatibility
+        segments: segments,
         createdAt: existingRoute?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -349,7 +379,9 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
               fontSize: '14px'
             }}
           >
-            Calculate Route
+            {loading && geocodingProgress.total > 0
+              ? `Calculating... (${geocodingProgress.current}/${geocodingProgress.total} segments)`
+              : 'Calculate Route'}
           </button>
 
           <button

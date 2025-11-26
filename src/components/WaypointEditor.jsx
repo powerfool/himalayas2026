@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * WaypointEditor component - Manual waypoint entry/editing
@@ -10,6 +11,7 @@ export default function WaypointEditor({ waypoints = [], onWaypointsChange }) {
     if (!newLocationName.trim()) return;
     
     const newWaypoint = {
+      id: uuidv4(),
       name: newLocationName.trim(),
       lat: 0,
       lng: 0,

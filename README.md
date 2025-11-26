@@ -4,19 +4,20 @@ A local web application for planning and visualizing motorbike routes in the Ind
 
 ## Current Status
 
-**Phases 0-3 Complete** - Full MVP with IndexedDB storage!
+**Phases 0-4 Complete** - Route segments calculation working!
 
 **What works right now:**
 - Route creation with Anthropic Claude LLM waypoint extraction
 - Geocoding via Nominatim with ambiguity resolution UI
 - Manual coordinate entry for failed/no-result geocoding
-- Route calculation via OpenRouteService
+- Route segment calculation (individual segments between waypoint pairs)
+- Progress tracking during segment calculation
 - Map visualization with Leaflet
 - IndexedDB persistent storage (with automatic localStorage migration)
 
-**Try it:** `npm run dev` → Create new route → Paste itinerary → Click "Extract Waypoints" → Click "Geocode Waypoints" (resolve ambiguities if needed) → Calculate Route → Save
+**Try it:** `npm run dev` → Create new route → Paste itinerary → Click "Extract Waypoints" → Click "Geocode Waypoints" (resolve ambiguities if needed) → Calculate Route (shows segment progress) → Save
 
-**Next:** Phase 4 - Route segments calculation and visualization
+**Next:** Phase 5 - Segment visualization on map (distinct colors per segment)
 
 ## Setup
 

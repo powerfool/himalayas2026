@@ -52,19 +52,20 @@ export async function geocodeLocation(locationName, countryCode = 'IN', limit = 
 }
 
 /**
- * Calculate route between waypoints using OpenRouteService
- * @param {Array<{lat: number, lng: number}>} waypoints - Array of waypoint coordinates
+ * Calculate route between two waypoints using OpenRouteService
+ * @param {Object} from - Starting waypoint {lat, lng}
+ * @param {Object} to - Ending waypoint {lat, lng}
  * @param {string} profile - Route profile (default: 'driving-motorcycle')
- * @returns {Promise<Array<[number, number]>>} Array of [lng, lat] coordinate pairs
+ * @returns {Promise<{polyline: Array<[number, number]>, distance: number, duration: number}>} Segment data
  */
-export async function calculateRoute(waypoints, profile = 'driving-motorcycle') {
-  if (!waypoints || waypoints.length < 2) {
-    throw new Error('At least 2 waypoints are required');
+export async function calculateRoute(from, to, profile = 'driving-motorcycle') {
+  if (!from || !to) {
+    throw new Error('Both from and to waypoints are required');
   }
 
   try {
     // Convert waypoints to ORS format (coordinates as [lng, lat])
-    const coordinates = waypoints.map(wp => [wp.lng, wp.lat]);
+    const coordinates = [[from.lng, from.lat], [to.lng, to.lat]];
 
     const url = `${ORS_API_BASE}/directions/${profile}`;
     
@@ -95,11 +96,74 @@ export async function calculateRoute(waypoints, profile = 'driving-motorcycle') 
     const coordinatesArray = data.features[0].geometry.coordinates;
     
     // Convert from [lng, lat] to [lat, lng] for Leaflet
-    return coordinatesArray.map(coord => [coord[1], coord[0]]);
+    const polyline = coordinatesArray.map(coord => [coord[1], coord[0]]);
+    
+    // Extract distance and duration from route properties
+    const properties = data.features[0].properties || {};
+    const distance = properties.segments?.[0]?.distance || 0; // meters
+    const duration = properties.segments?.[0]?.duration || 0; // seconds
+    
+    return {
+      polyline,
+      distance,
+      duration
+    };
   } catch (error) {
     console.error('Routing error:', error);
     throw error;
   }
+}
+
+/**
+ * Calculate route segments between consecutive waypoints
+ * @param {Array<{id: string, lat: number, lng: number}>} waypoints - Array of waypoints with IDs
+ * @param {string} profile - Route profile (default: 'driving-motorcycle')
+ * @param {Function} onProgress - Optional progress callback: (current, total) => void
+ * @returns {Promise<Array<{fromWaypointId: string, toWaypointId: string, polyline: Array, distance: number, duration: number}>>} Array of segments
+ */
+export async function calculateRouteSegments(waypoints, profile = 'driving-motorcycle', onProgress = null) {
+  if (!waypoints || waypoints.length < 2) {
+    throw new Error('At least 2 waypoints are required');
+  }
+
+  const segments = [];
+  const errors = [];
+  const totalSegments = waypoints.length - 1;
+
+  for (let i = 0; i < totalSegments; i++) {
+    const from = waypoints[i];
+    const to = waypoints[i + 1];
+    
+    // Update progress
+    if (onProgress) {
+      onProgress(i + 1, totalSegments);
+    }
+    
+    try {
+      const segmentData = await calculateRoute(from, to, profile);
+      segments.push({
+        fromWaypointId: from.id || from.order?.toString() || i.toString(),
+        toWaypointId: to.id || to.order?.toString() || (i + 1).toString(),
+        polyline: segmentData.polyline,
+        distance: segmentData.distance,
+        duration: segmentData.duration
+      });
+    } catch (error) {
+      console.warn(`Failed to calculate route segment ${i} → ${i + 1}:`, error);
+      errors.push({
+        from: from.name || `Waypoint ${i + 1}`,
+        to: to.name || `Waypoint ${i + 2}`,
+        error: error.message
+      });
+      // Continue with other segments even if one fails
+    }
+  }
+
+  if (segments.length === 0 && errors.length > 0) {
+    throw new Error(`All route segments failed. First error: ${errors[0].error}`);
+  }
+
+  return segments;
 }
 
 /**

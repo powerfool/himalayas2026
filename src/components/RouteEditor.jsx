@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { getRoute, saveRoute } from '../utils/storage';
 import { extractWaypointsWithRetry } from '../utils/anthropicService';
-import { geocodeLocation, calculateRouteSegments } from '../utils/openRouteService';
+import { geocodeLocation, calculateRouteSegments, DEFAULT_ROUTING_PROFILE } from '../utils/openRouteService';
 import RouteForm from './RouteForm';
 import WaypointEditor from './WaypointEditor';
 import MapView from './MapView';
@@ -224,7 +224,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
     try {
       const routeSegments = await calculateRouteSegments(
         geocodedWaypoints,
-        'foot-walking', // Using foot-walking profile for remote Himalayan routes
+        DEFAULT_ROUTING_PROFILE,
         (current, total) => {
           setGeocodingProgress({ current, total });
         }

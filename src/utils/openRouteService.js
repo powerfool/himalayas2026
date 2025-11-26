@@ -4,6 +4,11 @@
 
 const ORS_API_BASE = 'https://api.openrouteservice.org/v2';
 
+// Default routing profile for Himalayan routes
+// Valid profiles: 'driving-car', 'driving-hgv', 'cycling-regular', 'cycling-road', 
+// 'cycling-mountain', 'cycling-electric', 'foot-walking', 'foot-hiking', 'wheelchair'
+export const DEFAULT_ROUTING_PROFILE = 'foot-walking';
+
 /**
  * Get OpenRouteService API key from environment variable
  * Get your free API key from: https://openrouteservice.org/dev/#/signup
@@ -74,7 +79,7 @@ export async function geocodeLocation(locationName, countryCode = 'IN', limit = 
  *   'cycling-mountain', 'cycling-electric', 'foot-walking', 'foot-hiking', 'wheelchair'
  * @returns {Promise<{polyline: Array<[number, number]>, distance: number, duration: number}>} Segment data
  */
-export async function calculateRoute(from, to, profile = 'driving-car') {
+export async function calculateRoute(from, to, profile = DEFAULT_ROUTING_PROFILE) {
   if (!from || !to) {
     throw new Error('Both from and to waypoints are required');
   }
@@ -142,7 +147,7 @@ export async function calculateRoute(from, to, profile = 'driving-car') {
  * @param {Function} onProgress - Optional progress callback: (current, total) => void
  * @returns {Promise<Array<{fromWaypointId: string, toWaypointId: string, polyline: Array, distance: number, duration: number}>>} Array of segments
  */
-export async function calculateRouteSegments(waypoints, profile = 'foot-walking', onProgress = null) {
+export async function calculateRouteSegments(waypoints, profile = DEFAULT_ROUTING_PROFILE, onProgress = null) {
   if (!waypoints || waypoints.length < 2) {
     throw new Error('At least 2 waypoints are required');
   }

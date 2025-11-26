@@ -22,6 +22,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
   const [isNewRoute, setIsNewRoute] = useState(!routeId);
   const [geocodingProgress, setGeocodingProgress] = useState({ current: 0, total: 0 });
   const [ambiguityState, setAmbiguityState] = useState(null); // { waypointIndex, waypointName, candidates }
+  const [searchError, setSearchError] = useState(null); // Error message from search
 
   // Load route data when routeId changes
   useEffect(() => {
@@ -213,15 +214,18 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
     if (!ambiguityState || !newName.trim()) return;
     
     setLoading(true);
+    setSearchError(null);
     
     try {
       // Update the waypoint name with the new search term
-      const updatedWaypoints = [...waypoints];
-      updatedWaypoints[ambiguityState.waypointIndex] = {
-        ...updatedWaypoints[ambiguityState.waypointIndex],
-        name: newName.trim()
-      };
-      setWaypoints(updatedWaypoints);
+      setWaypoints(prevWaypoints => {
+        const updated = [...prevWaypoints];
+        updated[ambiguityState.waypointIndex] = {
+          ...updated[ambiguityState.waypointIndex],
+          name: newName.trim()
+        };
+        return updated;
+      });
       
       // Try geocoding with the new name
       const result = await geocodeLocation(newName.trim());
@@ -235,27 +239,27 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
           candidates: []
         });
         setLoading(false);
+        setSearchError(null);
       } else if (result.candidates.length === 1) {
         // Single result - use it automatically
-        updatedWaypoints[ambiguityState.waypointIndex] = {
-          ...updatedWaypoints[ambiguityState.waypointIndex],
-          lat: result.candidates[0].lat,
-          lng: result.candidates[0].lng,
-          display_name: result.candidates[0].display_name
-        };
-        setWaypoints(updatedWaypoints);
+        setWaypoints(prevWaypoints => {
+          const updated = [...prevWaypoints];
+          updated[ambiguityState.waypointIndex] = {
+            ...updated[ambiguityState.waypointIndex],
+            lat: result.candidates[0].lat,
+            lng: result.candidates[0].lng,
+            display_name: result.candidates[0].display_name
+          };
+          return updated;
+        });
         setAmbiguityState(null);
+        setSearchError(null);
         
         // Continue geocoding remaining waypoints
-        const remaining = updatedWaypoints.filter(wp => wp.lat === 0 && wp.lng === 0);
-        if (remaining.length > 0) {
-          setTimeout(() => {
-            handleGeocodeWaypoints();
-          }, 100);
-        } else {
-          setLoading(false);
-          setGeocodingProgress({ current: 0, total: 0 });
-        }
+        // Use setTimeout to ensure state updates are processed, then check if more waypoints need geocoding
+        setTimeout(() => {
+          handleGeocodeWaypoints();
+        }, 100);
       } else {
         // Multiple candidates - show them
         setAmbiguityState({
@@ -264,10 +268,12 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
           candidates: result.candidates
         });
         setLoading(false);
+        setSearchError(null);
       }
     } catch (err) {
       console.error(`Error geocoding "${newName}":`, err);
-      // Show manual entry for failed geocoding
+      // Show error message in the modal
+      setSearchError(err.message || 'Failed to search for location. Please try again or enter coordinates manually.');
       setAmbiguityState({
         waypointIndex: ambiguityState.waypointIndex,
         waypointName: newName.trim(),
@@ -527,6 +533,8 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
           onSkip={handleAmbiguitySkip}
           onCancel={handleAmbiguityCancel}
           onSearch={handleAmbiguitySearch}
+          isSearching={loading && ambiguityState.waypointIndex !== undefined}
+          searchError={searchError}
         />
       )}
     </div>

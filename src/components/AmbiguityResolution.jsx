@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 /**
  * AmbiguityResolution component - UI for resolving geocoding ambiguities
@@ -10,7 +10,9 @@ import { useState } from 'react';
  * @param {Function} props.onSelect - Callback when user selects a candidate: (candidate) => void
  * @param {Function} props.onSkip - Callback when user wants to skip: () => void
  * @param {Function} props.onCancel - Callback to cancel/close: () => void
- * @param {Function} props.onSearch - Callback to search with a different name: (newName) => void
+ * @param {Function} props.onSearch - Callback to search with a different name: (newName) => Promise<void>
+ * @param {boolean} props.isSearching - Whether a search is currently in progress
+ * @param {string} props.searchError - Error message if search failed
  */
 export default function AmbiguityResolution({
   waypointName,
@@ -18,12 +20,24 @@ export default function AmbiguityResolution({
   onSelect,
   onSkip,
   onCancel,
-  onSearch
+  onSearch,
+  isSearching = false,
+  searchError = null
 }) {
   const [manualCoords, setManualCoords] = useState({ lat: '', lng: '' });
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchName, setSearchName] = useState('');
+  
+  // Reset search view when candidates change (new search completed)
+  // This ensures we show results view, not search view, after successful search
+  useEffect(() => {
+    if (showSearch && candidates.length > 0 && !isSearching) {
+      // Search completed with results - show them instead of search view
+      setShowSearch(false);
+      setSearchName(''); // Clear search input
+    }
+  }, [candidates.length, showSearch, isSearching]);
 
   const handleManualSubmit = () => {
     const lat = parseFloat(manualCoords.lat);
@@ -44,6 +58,19 @@ export default function AmbiguityResolution({
       lng,
       display_name: `Manual: ${lat.toFixed(4)}, ${lng.toFixed(4)}`
     });
+  };
+
+  const handleSearch = async () => {
+    if (!searchName.trim() || isSearching) return;
+    
+    try {
+      await onSearch(searchName.trim());
+      // Note: We don't reset showSearch here - let the candidates change trigger it
+      // This allows the component to show loading state during search
+    } catch (error) {
+      // Error handling is done in parent component
+      // Component will show searchError prop if provided
+    }
   };
 
   return (
@@ -74,6 +101,32 @@ export default function AmbiguityResolution({
             ? `Multiple locations found for "${waypointName}"`
             : `No locations found for "${waypointName}"`}
         </h3>
+        
+        {isSearching && (
+          <div style={{
+            padding: '12px',
+            backgroundColor: '#dbeafe',
+            color: '#1e40af',
+            borderRadius: '4px',
+            marginBottom: '16px',
+            fontSize: '14px'
+          }}>
+            Searching for "{searchName || waypointName}"...
+          </div>
+        )}
+        
+        {searchError && (
+          <div style={{
+            padding: '12px',
+            backgroundColor: '#fee2e2',
+            color: '#991b1b',
+            borderRadius: '4px',
+            marginBottom: '16px',
+            fontSize: '14px'
+          }}>
+            Search failed: {searchError}
+          </div>
+        )}
         
         {!showManualEntry && !showSearch ? (
           <>
@@ -127,16 +180,20 @@ export default function AmbiguityResolution({
             )}
             
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {candidates.length === 0 && onSearch && (
+              {candidates.length === 0 && onSearch && !isSearching && (
                 <button
-                  onClick={() => setShowSearch(true)}
+                  onClick={() => {
+                    setShowSearch(true);
+                    setSearchName(''); // Start with empty search
+                  }}
+                  disabled={isSearching}
                   style={{
                     padding: '8px 16px',
-                    backgroundColor: '#3b82f6',
+                    backgroundColor: isSearching ? '#d1d5db' : '#3b82f6',
                     color: 'white',
                     border: 'none',
                     borderRadius: '4px',
-                    cursor: 'pointer',
+                    cursor: isSearching ? 'not-allowed' : 'pointer',
                     fontSize: '14px'
                   }}
                 >
@@ -283,6 +340,19 @@ export default function AmbiguityResolution({
               Original name: "{waypointName}". Enter an alternative name to search:
             </p>
             
+            {searchError && (
+              <div style={{
+                padding: '12px',
+                backgroundColor: '#fee2e2',
+                color: '#991b1b',
+                borderRadius: '4px',
+                marginBottom: '16px',
+                fontSize: '14px'
+              }}>
+                {searchError}
+              </div>
+            )}
+            
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: '500' }}>
                 Location Name
@@ -292,9 +362,10 @@ export default function AmbiguityResolution({
                 value={searchName}
                 onChange={(e) => setSearchName(e.target.value)}
                 placeholder="e.g., Leh, Ladakh, India"
+                disabled={isSearching}
                 onKeyPress={(e) => {
-                  if (e.key === 'Enter' && searchName.trim()) {
-                    onSearch(searchName.trim());
+                  if (e.key === 'Enter' && searchName.trim() && !isSearching) {
+                    handleSearch();
                   }
                 }}
                 style={{
@@ -303,7 +374,9 @@ export default function AmbiguityResolution({
                   border: '1px solid #d1d5db',
                   borderRadius: '4px',
                   fontSize: '14px',
-                  boxSizing: 'border-box'
+                  boxSizing: 'border-box',
+                  backgroundColor: isSearching ? '#f3f4f6' : 'white',
+                  cursor: isSearching ? 'not-allowed' : 'text'
                 }}
                 autoFocus
               />
@@ -311,33 +384,34 @@ export default function AmbiguityResolution({
             
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
-                onClick={() => onSearch(searchName.trim())}
-                disabled={!searchName.trim()}
+                onClick={handleSearch}
+                disabled={!searchName.trim() || isSearching}
                 style={{
                   padding: '8px 16px',
-                  backgroundColor: !searchName.trim() ? '#d1d5db' : '#10b981',
+                  backgroundColor: (!searchName.trim() || isSearching) ? '#d1d5db' : '#10b981',
                   color: 'white',
                   border: 'none',
                   borderRadius: '4px',
-                  cursor: !searchName.trim() ? 'not-allowed' : 'pointer',
+                  cursor: (!searchName.trim() || isSearching) ? 'not-allowed' : 'pointer',
                   fontSize: '14px'
                 }}
               >
-                Search
+                {isSearching ? 'Searching...' : 'Search'}
               </button>
               
               <button
                 onClick={() => {
                   setShowSearch(false);
-                  setSearchName('');
+                  // Don't clear searchName - user might want to edit it
                 }}
+                disabled={isSearching}
                 style={{
                   padding: '8px 16px',
-                  backgroundColor: '#6b7280',
+                  backgroundColor: isSearching ? '#d1d5db' : '#6b7280',
                   color: 'white',
                   border: 'none',
                   borderRadius: '4px',
-                  cursor: 'pointer',
+                  cursor: isSearching ? 'not-allowed' : 'pointer',
                   fontSize: '14px'
                 }}
               >

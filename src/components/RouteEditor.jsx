@@ -409,6 +409,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
         <MapView
           waypoints={waypoints}
           routePolyline={routePolyline}
+          segments={segments}
         />
       </div>
 

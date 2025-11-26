@@ -4,18 +4,19 @@ A local web application for planning and visualizing motorbike routes in the Ind
 
 ## Current Status
 
-**Phases 0-1 Complete** - LLM waypoint extraction working!
+**Phases 0-2 Complete** - Full waypoint extraction and geocoding with ambiguity resolution!
 
 **What works right now:**
 - Route creation with Anthropic Claude LLM waypoint extraction
-- Geocoding via Nominatim (separate step after extraction)
+- Geocoding via Nominatim with ambiguity resolution UI
+- Manual coordinate entry for failed/no-result geocoding
 - Route calculation via OpenRouteService
 - Map visualization with Leaflet
 - localStorage persistence
 
-**Try it:** `npm run dev` → Create new route → Paste itinerary → Click "Extract Waypoints" → Geocode → Calculate Route
+**Try it:** `npm run dev` → Create new route → Paste itinerary → Click "Extract Waypoints" → Click "Geocode Waypoints" (resolve ambiguities if needed) → Calculate Route
 
-**Next:** Phase 2 - Add geocoding ambiguity resolution UI
+**Next:** Phase 3 - Migrate storage from localStorage to IndexedDB
 
 ## Setup
 

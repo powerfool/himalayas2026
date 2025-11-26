@@ -24,30 +24,26 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
 
   // Load route data when routeId changes
   useEffect(() => {
-    if (routeId) {
-      const route = getRoute(routeId);
-      if (route) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setRouteName(route.name || '');
-         
-        setItineraryText(route.itineraryText || '');
-         
-        setWaypoints(route.waypoints || []);
-         
-        setRoutePolyline(route.routePolyline || []);
-         
-        setIsNewRoute(false);
+    const loadRouteAsync = async () => {
+      if (routeId) {
+        const route = await getRoute(routeId);
+        if (route) {
+          setRouteName(route.name || '');
+          setItineraryText(route.itineraryText || '');
+          setWaypoints(route.waypoints || []);
+          setRoutePolyline(route.routePolyline || []);
+          setIsNewRoute(false);
+        } else {
+          setError('Route not found');
+          setIsNewRoute(true);
+        }
       } else {
-         
-        setError('Route not found');
-         
+        // New route - initialize with empty UUID
         setIsNewRoute(true);
       }
-    } else {
-      // New route - initialize with empty UUID
-       
-      setIsNewRoute(true);
-    }
+    };
+    
+    loadRouteAsync();
   }, [routeId]);
 
   const handleParseItinerary = async () => {
@@ -231,29 +227,38 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!routeName.trim()) {
       setError('Route name is required');
       return;
     }
 
-    const routeToSave = {
-      id: routeId || uuidv4(),
-      name: routeName.trim(),
-      itineraryText: itineraryText.trim(),
-      waypoints: waypoints,
-      routePolyline: routePolyline,
-      createdAt: isNewRoute ? new Date().toISOString() : getRoute(routeId)?.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
+    setLoading(true);
+    setError(null);
 
     try {
-      saveRoute(routeToSave);
+      // Get existing route to preserve createdAt if updating
+      const existingRoute = routeId ? await getRoute(routeId) : null;
+      
+      const routeToSave = {
+        id: routeId || uuidv4(),
+        name: routeName.trim(),
+        itineraryText: itineraryText.trim(),
+        waypoints: waypoints,
+        routePolyline: routePolyline,
+        createdAt: existingRoute?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      await saveRoute(routeToSave);
+      setLoading(false);
+      
       if (onSave) {
         onSave(routeToSave);
       }
     } catch (err) {
       setError(`Error saving route: ${err.message}`);
+      setLoading(false);
     }
   };
 

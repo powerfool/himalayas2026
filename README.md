@@ -4,7 +4,7 @@ A local web application for planning and visualizing motorbike routes in the Ind
 
 ## Current Status
 
-**Phases 0-2 Complete** - Full waypoint extraction and geocoding with ambiguity resolution!
+**Phases 0-3 Complete** - Full MVP with IndexedDB storage!
 
 **What works right now:**
 - Route creation with Anthropic Claude LLM waypoint extraction
@@ -12,11 +12,11 @@ A local web application for planning and visualizing motorbike routes in the Ind
 - Manual coordinate entry for failed/no-result geocoding
 - Route calculation via OpenRouteService
 - Map visualization with Leaflet
-- localStorage persistence
+- IndexedDB persistent storage (with automatic localStorage migration)
 
-**Try it:** `npm run dev` → Create new route → Paste itinerary → Click "Extract Waypoints" → Click "Geocode Waypoints" (resolve ambiguities if needed) → Calculate Route
+**Try it:** `npm run dev` → Create new route → Paste itinerary → Click "Extract Waypoints" → Click "Geocode Waypoints" (resolve ambiguities if needed) → Calculate Route → Save
 
-**Next:** Phase 3 - Migrate storage from localStorage to IndexedDB
+**Next:** Phase 4 - Route segments calculation and visualization
 
 ## Setup
 
@@ -73,11 +73,11 @@ You can also manually add waypoints using the waypoint editor, and edit existing
 - **Leaflet + React-Leaflet**: Map visualization with OpenStreetMap
 - **OpenRouteService API**: Route calculation
 - **Nominatim (OpenStreetMap)**: Geocoding service
-- **localStorage**: Persistent data storage
+- **IndexedDB** (via idb package): Persistent data storage
 
 ## Data Storage
 
-Routes are stored locally in your browser's localStorage. All data persists between sessions.
+Routes are stored locally in your browser's IndexedDB. All data persists between sessions. If you have existing routes in localStorage, they will be automatically migrated to IndexedDB on first load.
 
 ## Future Enhancements
 

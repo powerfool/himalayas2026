@@ -1,19 +1,73 @@
 /**
- * Storage utility for managing routes in localStorage
+ * Storage utility for managing routes in IndexedDB
+ * Migrates from localStorage on first load
  */
 
+import { getDB, isIndexedDBSupported } from './indexedDB';
+
 const STORAGE_KEY = 'himalayas_routes';
+let migrationDone = false;
+
+/**
+ * Migrate routes from localStorage to IndexedDB (one-time operation)
+ * @returns {Promise<void>}
+ */
+async function migrateFromLocalStorage() {
+  if (migrationDone) return;
+  
+  try {
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (!data) {
+      migrationDone = true;
+      return;
+    }
+
+    const parsed = JSON.parse(data);
+    const routes = parsed.routes || [];
+    
+    if (routes.length === 0) {
+      migrationDone = true;
+      return;
+    }
+
+    // Migrate routes to IndexedDB
+    const db = await getDB();
+    const tx = db.transaction('routes', 'readwrite');
+    
+    for (const route of routes) {
+      await tx.store.put(route);
+    }
+    
+    await tx.done;
+    
+    // Clear localStorage after successful migration
+    localStorage.removeItem(STORAGE_KEY);
+    migrationDone = true;
+    
+    console.log(`Migrated ${routes.length} route(s) from localStorage to IndexedDB`);
+  } catch (error) {
+    console.error('Error migrating from localStorage:', error);
+    // Don't mark as done so we can retry
+  }
+}
 
 /**
  * Get all routes from storage
- * @returns {Array} Array of route objects
+ * @returns {Promise<Array>} Array of route objects
  */
-export function getAllRoutes() {
+export async function getAllRoutes() {
+  // Migrate from localStorage on first call
+  await migrateFromLocalStorage();
+  
+  if (!isIndexedDBSupported()) {
+    console.warn('IndexedDB not supported, falling back to empty array');
+    return [];
+  }
+
   try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    if (!data) return [];
-    const parsed = JSON.parse(data);
-    return parsed.routes || [];
+    const db = await getDB();
+    const routes = await db.getAll('routes');
+    return routes || [];
   } catch (error) {
     console.error('Error loading routes:', error);
     return [];
@@ -23,20 +77,40 @@ export function getAllRoutes() {
 /**
  * Get a single route by ID
  * @param {string} id - Route ID
- * @returns {Object|null} Route object or null if not found
+ * @returns {Promise<Object|null>} Route object or null if not found
  */
-export function getRoute(id) {
-  const routes = getAllRoutes();
-  return routes.find(route => route.id === id) || null;
+export async function getRoute(id) {
+  // Migrate from localStorage on first call
+  await migrateFromLocalStorage();
+  
+  if (!isIndexedDBSupported()) {
+    console.warn('IndexedDB not supported');
+    return null;
+  }
+
+  try {
+    const db = await getDB();
+    const route = await db.get('routes', id);
+    return route || null;
+  } catch (error) {
+    console.error('Error loading route:', error);
+    return null;
+  }
 }
 
 /**
  * Save a new route or update an existing one
  * @param {Object} route - Route object to save
- * @returns {Object} Saved route with updated timestamp
+ * @returns {Promise<Object>} Saved route with updated timestamp
  */
-export function saveRoute(route) {
-  const routes = getAllRoutes();
+export async function saveRoute(route) {
+  // Migrate from localStorage on first call
+  await migrateFromLocalStorage();
+  
+  if (!isIndexedDBSupported()) {
+    throw new Error('IndexedDB not supported. Cannot save route.');
+  }
+
   const now = new Date().toISOString();
   
   const routeToSave = {
@@ -45,16 +119,9 @@ export function saveRoute(route) {
     createdAt: route.createdAt || now,
   };
 
-  const existingIndex = routes.findIndex(r => r.id === route.id);
-  
-  if (existingIndex >= 0) {
-    routes[existingIndex] = routeToSave;
-  } else {
-    routes.push(routeToSave);
-  }
-
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ routes }));
+    const db = await getDB();
+    await db.put('routes', routeToSave);
     return routeToSave;
   } catch (error) {
     console.error('Error saving route:', error);
@@ -65,23 +132,28 @@ export function saveRoute(route) {
 /**
  * Delete a route by ID
  * @param {string} id - Route ID to delete
- * @returns {boolean} True if deleted, false if not found
+ * @returns {Promise<boolean>} True if deleted, false if not found
  */
-export function deleteRoute(id) {
-  const routes = getAllRoutes();
-  const filtered = routes.filter(route => route.id !== id);
+export async function deleteRoute(id) {
+  // Migrate from localStorage on first call
+  await migrateFromLocalStorage();
   
-  if (filtered.length === routes.length) {
-    return false; // Route not found
+  if (!isIndexedDBSupported()) {
+    throw new Error('IndexedDB not supported. Cannot delete route.');
   }
 
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ routes: filtered }));
+    const db = await getDB();
+    const existing = await db.get('routes', id);
+    
+    if (!existing) {
+      return false; // Route not found
+    }
+    
+    await db.delete('routes', id);
     return true;
   } catch (error) {
     console.error('Error deleting route:', error);
     throw error;
   }
 }
-
-

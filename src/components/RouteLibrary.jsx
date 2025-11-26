@@ -10,27 +10,33 @@ export default function RouteLibrary({ onSelectRoute, onNewRoute }) {
 
   // Load routes on mount
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true);
-    const allRoutes = getAllRoutes();
-    // Sort by updated date (most recent first)
-    allRoutes.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-     
-    setRoutes(allRoutes);
-     
-    setLoading(false);
-  }, []);
-
-  const handleDelete = (e, routeId) => {
-    e.stopPropagation();
-    if (window.confirm('Are you sure you want to delete this route?')) {
-      deleteRoute(routeId);
-      // Reload routes after deletion
+    const loadRoutesAsync = async () => {
       setLoading(true);
-      const allRoutes = getAllRoutes();
+      const allRoutes = await getAllRoutes();
+      // Sort by updated date (most recent first)
       allRoutes.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
       setRoutes(allRoutes);
       setLoading(false);
+    };
+    
+    loadRoutesAsync();
+  }, []);
+
+  const handleDelete = async (e, routeId) => {
+    e.stopPropagation();
+    if (window.confirm('Are you sure you want to delete this route?')) {
+      try {
+        await deleteRoute(routeId);
+        // Reload routes after deletion
+        setLoading(true);
+        const allRoutes = await getAllRoutes();
+        allRoutes.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+        setRoutes(allRoutes);
+        setLoading(false);
+      } catch (error) {
+        console.error('Error deleting route:', error);
+        alert('Failed to delete route. Please try again.');
+      }
     }
   };
 

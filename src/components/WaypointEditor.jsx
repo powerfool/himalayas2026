@@ -3,8 +3,12 @@ import { v4 as uuidv4 } from 'uuid';
 
 /**
  * WaypointEditor component - Manual waypoint entry/editing
+ * @param {Array} waypoints - Array of waypoint objects
+ * @param {Function} onWaypointsChange - Callback when waypoints change
+ * @param {Function} onGeocodeWaypoint - Optional callback to geocode a single waypoint: (index) => void
+ * @param {boolean} isGeocoding - Whether geocoding is in progress
  */
-export default function WaypointEditor({ waypoints = [], onWaypointsChange }) {
+export default function WaypointEditor({ waypoints = [], onWaypointsChange, onGeocodeWaypoint = null, isGeocoding = false }) {
   const [newLocationName, setNewLocationName] = useState('');
 
   const handleAddWaypoint = () => {
@@ -142,6 +146,21 @@ export default function WaypointEditor({ waypoints = [], onWaypointsChange }) {
                 ) : (
                   <div style={{ fontSize: '12px', color: '#ef4444' }}>
                     Not geocoded yet
+                    {onGeocodeWaypoint && (
+                      <span
+                        onClick={() => !isGeocoding && onGeocodeWaypoint(index)}
+                        style={{
+                          marginLeft: '8px',
+                          color: '#3b82f6',
+                          cursor: isGeocoding ? 'not-allowed' : 'pointer',
+                          textDecoration: 'underline',
+                          opacity: isGeocoding ? 0.5 : 1
+                        }}
+                        title="Click to geocode this waypoint"
+                      >
+                        Geocode
+                      </span>
+                    )}
                   </div>
                 )}
               </div>

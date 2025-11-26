@@ -67,20 +67,6 @@ export default function MapView({ waypoints = [], routePolyline = [], segments =
   
   // Debug logging
   useEffect(() => {
-    if (segments && segments.length > 0) {
-      console.log('MapView received segments:', segments.length);
-      segments.forEach((seg, idx) => {
-        console.log(`Segment ${idx}:`, {
-          from: seg.fromWaypointId,
-          to: seg.toWaypointId,
-          polylinePoints: seg.polyline?.length || 0
-        });
-      });
-    } else if (routePolyline && routePolyline.length > 0) {
-      console.log('MapView using routePolyline (fallback):', routePolyline.length, 'points');
-    } else {
-      console.log('MapView: No route data to display');
-    }
   }, [segments, routePolyline]);
 
   // Color palette for segments (cycling through colors)
@@ -152,8 +138,6 @@ export default function MapView({ waypoints = [], routePolyline = [], segments =
               return null;
             }
             
-            console.log(`Rendering segment ${index} with ${validPolyline.length} points, color: ${segmentColors[index % segmentColors.length]}`);
-            
             return (
               <Polyline
                 key={`segment-${index}-${segment.fromWaypointId}-${segment.toWaypointId}`}
@@ -183,7 +167,6 @@ export default function MapView({ waypoints = [], routePolyline = [], segments =
           .map((waypoint, index) => {
             // Use order + 1 for sequence number (order is 0-based)
             const sequenceNumber = (waypoint.order !== undefined ? waypoint.order : index) + 1;
-            console.log(`Rendering waypoint marker ${sequenceNumber}: ${waypoint.name} at [${waypoint.lat}, ${waypoint.lng}]`);
             return (
               <Marker
                 key={waypoint.id || `wp-${waypoint.order}-${index}`}

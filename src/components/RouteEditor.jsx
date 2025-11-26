@@ -20,7 +20,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isNewRoute, setIsNewRoute] = useState(!routeId);
-  const [geocodingProgress, setGeocodingProgress] = useState({ current: 0, total: 0 });
+  const [geocodingProgress, setGeocodingProgress] = useState({ current: 0, total: 0, message: null });
   const [ambiguityState, setAmbiguityState] = useState(null); // { waypointIndex, waypointName, candidates }
   const [searchError, setSearchError] = useState(null); // Error message from search
 
@@ -86,6 +86,71 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
     }
   };
 
+  const handleGeocodeSingleWaypoint = async (waypointIndex) => {
+    if (waypointIndex < 0 || waypointIndex >= waypoints.length) {
+      return;
+    }
+
+    const waypoint = waypoints[waypointIndex];
+    
+    // Check if already geocoded
+    if (waypoint.lat !== 0 && waypoint.lng !== 0) {
+      setError('This waypoint is already geocoded');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setGeocodingProgress({ current: 1, total: 1, message: `Geocoding ${waypoint.name}...` });
+
+    try {
+      const result = await geocodeLocation(waypoint.name);
+      
+      // Check if there are multiple candidates or no candidates
+      if (result.candidates.length === 0) {
+        // No results - show manual entry option
+        setAmbiguityState({
+          waypointIndex,
+          waypointName: waypoint.name,
+          candidates: []
+        });
+        setLoading(false);
+        setGeocodingProgress({ current: 0, total: 0, message: null });
+      } else if (result.candidates.length === 1) {
+        // Single result - use it automatically
+        const updatedWaypoints = [...waypoints];
+        updatedWaypoints[waypointIndex] = {
+          ...updatedWaypoints[waypointIndex],
+          lat: result.candidates[0].lat,
+          lng: result.candidates[0].lng,
+          display_name: result.candidates[0].display_name
+        };
+        setWaypoints(updatedWaypoints);
+        setLoading(false);
+        setGeocodingProgress({ current: 0, total: 0, message: null });
+      } else {
+        // Multiple candidates - show ambiguity resolution UI
+        setAmbiguityState({
+          waypointIndex,
+          waypointName: waypoint.name,
+          candidates: result.candidates
+        });
+        setLoading(false);
+        setGeocodingProgress({ current: 0, total: 0, message: null });
+      }
+    } catch (err) {
+      console.error(`Error geocoding ${waypoint.name}:`, err);
+      // Show manual entry for failed geocoding
+      setAmbiguityState({
+        waypointIndex,
+        waypointName: waypoint.name,
+        candidates: []
+      });
+      setLoading(false);
+      setGeocodingProgress({ current: 0, total: 0, message: null });
+    }
+  };
+
   const handleGeocodeWaypoints = async () => {
     const ungeocoded = waypoints.filter(wp => wp.lat === 0 && wp.lng === 0);
     if (ungeocoded.length === 0) {
@@ -95,7 +160,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
 
     setLoading(true);
     setError(null);
-    setGeocodingProgress({ current: 0, total: ungeocoded.length });
+    setGeocodingProgress({ current: 0, total: ungeocoded.length, message: null });
 
     // Geocode waypoints one by one to handle ambiguities
     const updatedWaypoints = [...waypoints];
@@ -104,7 +169,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
       const waypoint = ungeocoded[i];
       const waypointIndex = waypoints.findIndex(wp => wp.name === waypoint.name && wp.lat === 0 && wp.lng === 0);
       
-      setGeocodingProgress({ current: i + 1, total: ungeocoded.length });
+      setGeocodingProgress({ current: i + 1, total: ungeocoded.length, message: null });
       
       try {
         const result = await geocodeLocation(waypoint.name);
@@ -158,10 +223,10 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
 
     // All waypoints geocoded successfully
     setLoading(false);
-    setGeocodingProgress({ current: 0, total: 0 });
+    setGeocodingProgress({ current: 0, total: 0, message: null });
   };
 
-  const handleAmbiguityResolve = (selectedCandidate) => {
+  const handleAmbiguityResolve = async (selectedCandidate) => {
     if (!ambiguityState) return;
     
     const updatedWaypoints = [...waypoints];
@@ -178,13 +243,77 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
     // Continue geocoding remaining waypoints using updated list
     const remaining = updatedWaypoints.filter(wp => wp.lat === 0 && wp.lng === 0);
     if (remaining.length > 0) {
-      // Use setTimeout to ensure state update is processed
-      setTimeout(() => {
-        handleGeocodeWaypoints();
-      }, 100);
+      // Continue geocoding from the updated waypoints list
+      setLoading(true);
+      setError(null);
+      setGeocodingProgress({ current: 0, total: remaining.length });
+      
+      // Use the updated waypoints list directly to avoid state timing issues
+      for (let i = 0; i < remaining.length; i++) {
+        const waypoint = remaining[i];
+        const waypointIndex = updatedWaypoints.findIndex(wp => wp.id === waypoint.id && wp.lat === 0 && wp.lng === 0);
+        
+        // Skip if waypoint was already geocoded (shouldn't happen, but safety check)
+        if (waypointIndex === -1) continue;
+        
+        setGeocodingProgress({ current: i + 1, total: remaining.length });
+        
+        try {
+          const result = await geocodeLocation(waypoint.name);
+          
+          // Check if there are multiple candidates or no candidates
+          if (result.candidates.length === 0) {
+            // No results - show manual entry option
+            setAmbiguityState({
+              waypointIndex,
+              waypointName: waypoint.name,
+              candidates: []
+            });
+            setLoading(false);
+            return; // Wait for user to resolve
+          } else if (result.candidates.length === 1) {
+            // Single result - use it automatically
+            updatedWaypoints[waypointIndex] = {
+              ...updatedWaypoints[waypointIndex],
+              lat: result.candidates[0].lat,
+              lng: result.candidates[0].lng,
+              display_name: result.candidates[0].display_name
+            };
+            setWaypoints([...updatedWaypoints]);
+          } else {
+            // Multiple candidates - show ambiguity resolution UI
+            setAmbiguityState({
+              waypointIndex,
+              waypointName: waypoint.name,
+              candidates: result.candidates
+            });
+            setLoading(false);
+            return; // Wait for user to resolve
+          }
+          
+          // Rate limit: 1 request per second
+          if (i < remaining.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        } catch (err) {
+          console.error(`Error geocoding ${waypoint.name}:`, err);
+          // Show manual entry for failed geocoding
+          setAmbiguityState({
+            waypointIndex,
+            waypointName: waypoint.name,
+            candidates: []
+          });
+          setLoading(false);
+          return;
+        }
+      }
+      
+      // All remaining waypoints geocoded successfully
+      setLoading(false);
+      setGeocodingProgress({ current: 0, total: 0, message: null });
     } else {
       setLoading(false);
-      setGeocodingProgress({ current: 0, total: 0 });
+      setGeocodingProgress({ current: 0, total: 0, message: null });
     }
   };
 
@@ -200,14 +329,14 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
       }, 100);
     } else {
       setLoading(false);
-      setGeocodingProgress({ current: 0, total: 0 });
+      setGeocodingProgress({ current: 0, total: 0, message: null });
     }
   };
 
   const handleAmbiguityCancel = () => {
     setAmbiguityState(null);
     setLoading(false);
-    setGeocodingProgress({ current: 0, total: 0 });
+    setGeocodingProgress({ current: 0, total: 0, message: null });
   };
 
   const handleAmbiguitySearch = async (newName) => {
@@ -242,24 +371,86 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
         setSearchError(null);
       } else if (result.candidates.length === 1) {
         // Single result - use it automatically
+        let updatedWaypoints;
         setWaypoints(prevWaypoints => {
-          const updated = [...prevWaypoints];
-          updated[ambiguityState.waypointIndex] = {
-            ...updated[ambiguityState.waypointIndex],
+          updatedWaypoints = [...prevWaypoints];
+          updatedWaypoints[ambiguityState.waypointIndex] = {
+            ...updatedWaypoints[ambiguityState.waypointIndex],
             lat: result.candidates[0].lat,
             lng: result.candidates[0].lng,
             display_name: result.candidates[0].display_name
           };
-          return updated;
+          return updatedWaypoints;
         });
         setAmbiguityState(null);
         setSearchError(null);
         
-        // Continue geocoding remaining waypoints
-        // Use setTimeout to ensure state updates are processed, then check if more waypoints need geocoding
-        setTimeout(() => {
-          handleGeocodeWaypoints();
-        }, 100);
+        // Continue geocoding remaining waypoints using updated list
+        const remaining = updatedWaypoints.filter(wp => wp.lat === 0 && wp.lng === 0);
+        if (remaining.length > 0) {
+          // Continue geocoding from the updated waypoints list
+          setLoading(true);
+          setError(null);
+          setGeocodingProgress({ current: 0, total: remaining.length, message: null });
+          
+          for (let i = 0; i < remaining.length; i++) {
+            const waypoint = remaining[i];
+            const waypointIndex = updatedWaypoints.findIndex(wp => wp.id === waypoint.id && wp.lat === 0 && wp.lng === 0);
+            
+            if (waypointIndex === -1) continue;
+            
+            setGeocodingProgress({ current: i + 1, total: remaining.length, message: null });
+            
+            try {
+              const geocodeResult = await geocodeLocation(waypoint.name);
+              
+              if (geocodeResult.candidates.length === 0) {
+                setAmbiguityState({
+                  waypointIndex,
+                  waypointName: waypoint.name,
+                  candidates: []
+                });
+                setLoading(false);
+                return;
+              } else if (geocodeResult.candidates.length === 1) {
+                updatedWaypoints[waypointIndex] = {
+                  ...updatedWaypoints[waypointIndex],
+                  lat: geocodeResult.candidates[0].lat,
+                  lng: geocodeResult.candidates[0].lng,
+                  display_name: geocodeResult.candidates[0].display_name
+                };
+                setWaypoints([...updatedWaypoints]);
+              } else {
+                setAmbiguityState({
+                  waypointIndex,
+                  waypointName: waypoint.name,
+                  candidates: geocodeResult.candidates
+                });
+                setLoading(false);
+                return;
+              }
+              
+              if (i < remaining.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+            } catch (err) {
+              console.error(`Error geocoding ${waypoint.name}:`, err);
+              setAmbiguityState({
+                waypointIndex,
+                waypointName: waypoint.name,
+                candidates: []
+              });
+              setLoading(false);
+              return;
+            }
+          }
+          
+          setLoading(false);
+          setGeocodingProgress({ current: 0, total: 0, message: null });
+        } else {
+          setLoading(false);
+          setGeocodingProgress({ current: 0, total: 0, message: null });
+        }
       } else {
         // Multiple candidates - show them
         setAmbiguityState({
@@ -293,36 +484,65 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
 
     setLoading(true);
     setError(null);
-    setGeocodingProgress({ current: 0, total: geocodedWaypoints.length - 1 });
+    setGeocodingProgress({ current: 0, total: geocodedWaypoints.length - 1, message: null });
 
     try {
-      const routeSegments = await calculateRouteSegments(
+      const result = await calculateRouteSegments(
         geocodedWaypoints,
         DEFAULT_ROUTING_PROFILE,
-        (current, total) => {
-          setGeocodingProgress({ current, total });
+        (current, total, message) => {
+          setGeocodingProgress({ 
+            current, 
+            total,
+            message: message || `Calculating segment ${current} of ${total}`
+          });
         }
       );
+      
+      const { segments: routeSegments, adjustedWaypoints: adjusted } = result;
       
       if (routeSegments.length === 0) {
         setError('Failed to calculate any route segments');
         setLoading(false);
-        setGeocodingProgress({ current: 0, total: 0 });
+        setGeocodingProgress({ current: 0, total: 0, message: null });
         return;
       }
 
-      console.log('Route segments calculated:', routeSegments);
-      console.log('Number of segments:', routeSegments.length);
-      routeSegments.forEach((seg, idx) => {
-        console.log(`Segment ${idx}:`, {
-          from: seg.fromWaypointId,
-          to: seg.toWaypointId,
-          polylineLength: seg.polyline?.length || 0,
-          firstPoint: seg.polyline?.[0],
-          lastPoint: seg.polyline?.[seg.polyline?.length - 1]
+      // Update waypoints with adjusted coordinates if any were adjusted
+      if (adjusted && adjusted.length > 0) {
+        setWaypoints(prevWaypoints => {
+          const updated = prevWaypoints.map(wp => {
+            // Match by ID first, then by order
+            const adjustedWp = adjusted.find(aw => {
+              if (wp.id && aw.waypointId === wp.id) return true;
+              if (!wp.id && wp.order !== undefined && aw.waypointId === wp.order.toString()) return true;
+              return false;
+            });
+            if (adjustedWp) {
+              return {
+                ...wp,
+                lat: adjustedWp.adjusted.lat,
+                lng: adjustedWp.adjusted.lng,
+                adjusted: true,
+                originalCoordinates: adjustedWp.original
+              };
+            }
+            return wp;
+          });
+          return updated;
         });
-      });
-      
+        
+        // Show info about adjusted waypoints
+        const adjustedNames = adjusted.map(aw => {
+          const wp = geocodedWaypoints.find(w => 
+            (w.id || w.order?.toString()) === aw.waypointId
+          );
+          return wp?.name || `Waypoint ${aw.waypointId}`;
+        }).join(', ');
+        
+        console.log(`Adjusted ${adjusted.length} waypoint(s) to find routable coordinates: ${adjustedNames}`);
+      }
+
       setSegments(routeSegments);
       
       // Generate combined polyline for backward compatibility
@@ -330,23 +550,23 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
       setRoutePolyline(combinedPolyline);
       
       setLoading(false);
-      setGeocodingProgress({ current: 0, total: 0 });
+      setGeocodingProgress({ current: 0, total: 0, message: null });
       
       if (routeSegments.length < geocodedWaypoints.length - 1) {
         setError(`Warning: Only ${routeSegments.length} of ${geocodedWaypoints.length - 1} segments calculated successfully. Some segments may be missing.`);
       } else {
-        // Show success message
-        setError(null);
-        // Clear any previous error after a short delay to show success
-        setTimeout(() => {
-          // Success - segments calculated
-        }, 100);
+        // Show success message, including info about adjusted waypoints if any
+        if (adjusted && adjusted.length > 0) {
+          setError(`Route calculated successfully. ${adjusted.length} waypoint(s) adjusted to find routable coordinates.`);
+        } else {
+          setError(null);
+        }
       }
     } catch (err) {
       console.error('Route calculation error:', err);
       setError(`Error calculating route: ${err.message}. Check browser console for details.`);
       setLoading(false);
-      setGeocodingProgress({ current: 0, total: 0 });
+      setGeocodingProgress({ current: 0, total: 0, message: null });
       setSegments([]); // Clear segments on error
       setRoutePolyline([]);
     }
@@ -441,6 +661,8 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
         <WaypointEditor
           waypoints={waypoints}
           onWaypointsChange={setWaypoints}
+          onGeocodeWaypoint={handleGeocodeSingleWaypoint}
+          isGeocoding={loading}
         />
 
         <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -476,7 +698,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
             }}
           >
             {loading && geocodingProgress.total > 0
-              ? `Calculating... (${geocodingProgress.current}/${geocodingProgress.total} segments)`
+              ? (geocodingProgress.message || `Calculating... (${geocodingProgress.current}/${geocodingProgress.total} segments)`)
               : segments.length > 0
               ? `Recalculate Route (${segments.length} segments)`
               : 'Calculate Route'}

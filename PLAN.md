@@ -287,6 +287,71 @@ Reference: See `SPEC.md` for detailed requirements and architecture.
 
 ---
 
+## Phase 7: Waypoint Fallback Routing
+
+**Goal:** Automatically find routable coordinates when OpenRouteService cannot route to a waypoint within 350 meters, by searching along the straight line between waypoints.
+
+**Files:**
+- `src/utils/openRouteService.js` (modify - add fallback logic)
+- `src/utils/geoUtils.js` (new - coordinate calculation utilities)
+- `src/components/RouteEditor.jsx` (modify - handle adjusted waypoints, show progress)
+
+**Tasks:**
+1. Create `src/utils/geoUtils.js`:
+   - `haversineDistance(lat1, lng1, lat2, lng2)` - calculate distance between two coordinates in meters
+   - `calculatePointOnLine(from, to, distanceFromTo)` - calculate coordinate on straight line at specific distance from 'to' point
+   - Both functions use standard geographic formulas (Haversine for distance, bearing/interpolation for point on line)
+2. Modify `calculateRoute` in `openRouteService.js`:
+   - Detect routing failures that indicate "no route within 350m" (check error message/status code)
+   - Return error object with flag indicating fallback should be attempted
+3. Add `findRoutableCoordinate(from, to, stepSize = 100)` function in `openRouteService.js`:
+   - Calculate straight-line distance between from and to
+   - Set maximum search distance to half the straight-line distance
+   - Start at 100m from 'to' waypoint (toward 'from')
+   - Loop: attempt routing from 'from' to test coordinate
+   - If routing succeeds, return adjusted coordinate
+   - If routing fails, increase distance by stepSize (100m) and retry
+   - Continue until routable coordinate found or max distance reached
+   - Return `{ success: boolean, adjustedCoordinate: {lat, lng} | null, attempts: number }`
+4. Modify `calculateRouteSegments` in `openRouteService.js`:
+   - When routing fails for a segment, check if error indicates "no route within 350m"
+   - If yes, call `findRoutableCoordinate` to attempt fallback
+   - If fallback succeeds, update the 'to' waypoint coordinates with adjusted coordinate
+   - Store original coordinates in waypoint data (add `originalCoordinates` field if adjusted)
+   - Add `adjusted: true` flag to waypoint if coordinates were modified
+   - Continue with adjusted waypoint for remaining segments
+   - Show progress indication during fallback attempts
+5. Update waypoint data structure:
+   - Add optional `adjusted: boolean` field
+   - Add optional `originalCoordinates: {lat, lng}` field (only if adjusted)
+6. Update `RouteEditor.jsx`:
+   - Handle adjusted waypoints in UI (show indicator if waypoint was adjusted, optional)
+   - Update progress callback to show fallback routing progress
+   - Display message when waypoint coordinates are adjusted
+
+**Done means:**
+- When routing fails within 350m of a waypoint, system automatically searches for routable coordinate
+- Search starts 100m from problematic waypoint, increases by 100m steps
+- Maximum search distance is half the straight-line distance between waypoints
+- If routable coordinate found, waypoint coordinates updated and routing continues
+- Original coordinates preserved in waypoint data
+- Progress indication shows fallback routing attempts
+- If no routable coordinate found, falls back to original error handling
+
+**Test it:**
+1. Create route with waypoint that's known to fail routing (e.g., waypoint in remote area with no roads within 350m)
+2. Click "Calculate Route"
+3. Verify system detects routing failure
+4. Verify fallback search begins (check console or progress indicator)
+5. Verify adjusted waypoint coordinates are found and used
+6. Verify route segments calculate successfully with adjusted waypoint
+7. Verify original waypoint coordinates preserved in data structure
+8. Verify map shows route using adjusted coordinates
+9. Test edge case: waypoint where no routable coordinate found within max distance - verify graceful fallback to error handling
+10. Test with multiple waypoints - verify fallback only affects problematic waypoints
+
+---
+
 ## Success Criteria
 
 MVP complete when:
@@ -296,6 +361,7 @@ MVP complete when:
 4. ✅ Routes save to IndexedDB and persist across sessions
 5. ✅ User can iterate on routes over multiple sessions
 6. ✅ All error cases handled gracefully
+7. ✅ Waypoint fallback routing automatically handles unreachable waypoints
 
 ## Notes
 

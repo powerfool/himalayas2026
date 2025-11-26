@@ -2,6 +2,8 @@
  * OpenRouteService API integration for routing and geocoding
  */
 
+import { haversineDistance, calculatePointOnLine } from './geoUtils';
+
 const ORS_API_BASE = 'https://api.openrouteservice.org/v2';
 
 /**
@@ -111,6 +113,26 @@ export async function geocodeLocation(locationName, countryCode = 'IN', limit = 
 }
 
 /**
+ * Check if an error indicates that no route was found (potentially within 350m threshold)
+ * @param {Error} error - The error object
+ * @returns {boolean} True if error suggests no route found
+ */
+function isNoRouteError(error) {
+  const errorMessage = error.message.toLowerCase();
+  const indicators = [
+    'no route',
+    'unreachable',
+    'route not found',
+    'cannot find route',
+    'no route found',
+    '400', // Bad request often means no route
+    '404'  // Not found
+  ];
+  
+  return indicators.some(indicator => errorMessage.includes(indicator));
+}
+
+/**
  * Calculate route between two waypoints using OpenRouteService
  * @param {Object} from - Starting waypoint {lat, lng}
  * @param {Object} to - Ending waypoint {lat, lng}
@@ -118,6 +140,7 @@ export async function geocodeLocation(locationName, countryCode = 'IN', limit = 
  *   Valid profiles: 'driving-car', 'driving-hgv', 'cycling-regular', 'cycling-road', 
  *   'cycling-mountain', 'cycling-electric', 'foot-walking', 'foot-hiking', 'wheelchair'
  * @returns {Promise<{polyline: Array<[number, number]>, distance: number, duration: number}>} Segment data
+ * @throws {Error} If routing fails, error will have isNoRouteError flag
  */
 export async function calculateRoute(from, to, profile = DEFAULT_ROUTING_PROFILE) {
   if (!from || !to) {
@@ -141,14 +164,13 @@ export async function calculateRoute(from, to, profile = DEFAULT_ROUTING_PROFILE
         format: 'geojson'
       })
     });
-    
-    console.log('OpenRouteService request:', { url, coordinates, profile });
-    console.log('OpenRouteService response status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error('OpenRouteService API error:', response.status, errorText);
-      throw new Error(`Routing failed (${response.status}): ${errorText.substring(0, 200)}`);
+      const error = new Error(`Routing failed (${response.status}): ${errorText.substring(0, 200)}`);
+      error.isNoRouteError = isNoRouteError(error);
+      throw error;
     }
 
     const data = await response.json();
@@ -189,8 +211,10 @@ export async function calculateRoute(from, to, profile = DEFAULT_ROUTING_PROFILE
         duration = route.segments[0].duration || 0;
       }
     } else {
-      console.error('No route data in response:', data);
-      throw new Error('No route found between these waypoints');
+      // No route data - this indicates no route found
+      const error = new Error('No route found between these waypoints');
+      error.isNoRouteError = true;
+      throw error;
     }
     
     // Convert from [lng, lat] to [lat, lng] for Leaflet
@@ -202,17 +226,85 @@ export async function calculateRoute(from, to, profile = DEFAULT_ROUTING_PROFILE
       duration
     };
   } catch (error) {
+    // Mark error if it indicates no route found
+    if (!error.isNoRouteError) {
+      error.isNoRouteError = isNoRouteError(error);
+    }
     console.error('Routing error:', error);
     throw error;
   }
 }
 
 /**
+ * Find the closest routable coordinate on the straight line between two waypoints
+ * @param {Object} from - Starting waypoint {lat, lng}
+ * @param {Object} to - Ending waypoint {lat, lng}
+ * @param {string} profile - Route profile (default: 'driving-car')
+ * @param {number} stepSize - Distance step size in meters (default: 100)
+ * @param {Function} onProgress - Optional progress callback: (attempt, distance) => void
+ * @returns {Promise<{success: boolean, adjustedCoordinate: {lat, lng} | null, attempts: number}>}
+ */
+export async function findRoutableCoordinate(from, to, profile = DEFAULT_ROUTING_PROFILE, stepSize = 100, onProgress = null) {
+  // Calculate straight-line distance between waypoints
+  const totalDistance = haversineDistance(from.lat, from.lng, to.lat, to.lng);
+  
+  // Maximum search distance is half the straight-line distance
+  const maxDistance = totalDistance / 2;
+  
+  // Start at stepSize meters from 'to' waypoint (toward 'from')
+  let currentDistance = stepSize;
+  let attempts = 0;
+  
+  while (currentDistance <= maxDistance) {
+    attempts++;
+    
+    // Calculate test coordinate on the line
+    const testCoordinate = calculatePointOnLine(from, to, currentDistance);
+    
+    if (onProgress) {
+      onProgress(attempts, currentDistance);
+    }
+    
+    try {
+      // Attempt to route from 'from' to test coordinate
+      await calculateRoute(from, testCoordinate, profile);
+      
+      // Routing succeeded - return this coordinate
+      return {
+        success: true,
+        adjustedCoordinate: testCoordinate,
+        attempts
+      };
+    } catch (error) {
+      // Routing failed - try next distance
+      if (!error.isNoRouteError) {
+        // If it's not a "no route" error, something else went wrong - don't continue
+        return {
+          success: false,
+          adjustedCoordinate: null,
+          attempts
+        };
+      }
+      
+      // Increase distance and try again
+      currentDistance += stepSize;
+    }
+  }
+  
+  // No routable coordinate found within max distance
+  return {
+    success: false,
+    adjustedCoordinate: null,
+    attempts
+  };
+}
+
+/**
  * Calculate route segments between consecutive waypoints
- * @param {Array<{id: string, lat: number, lng: number}>} waypoints - Array of waypoints with IDs
+ * @param {Array<{id: string, lat: number, lng: number, name?: string, order?: number}>} waypoints - Array of waypoints with IDs
  * @param {string} profile - Route profile (default: 'driving-motorcycle')
- * @param {Function} onProgress - Optional progress callback: (current, total) => void
- * @returns {Promise<Array<{fromWaypointId: string, toWaypointId: string, polyline: Array, distance: number, duration: number}>>} Array of segments
+ * @param {Function} onProgress - Optional progress callback: (current, total, message?) => void
+ * @returns {Promise<{segments: Array, adjustedWaypoints: Array}>} Segments and any adjusted waypoints
  */
 export async function calculateRouteSegments(waypoints, profile = DEFAULT_ROUTING_PROFILE, onProgress = null) {
   if (!waypoints || waypoints.length < 2) {
@@ -221,34 +313,133 @@ export async function calculateRouteSegments(waypoints, profile = DEFAULT_ROUTIN
 
   const segments = [];
   const errors = [];
+  const adjustedWaypoints = [];
   const totalSegments = waypoints.length - 1;
+  // Create a mutable copy of waypoints to allow adjustments
+  const workingWaypoints = waypoints.map(wp => ({ ...wp }));
 
   for (let i = 0; i < totalSegments; i++) {
-    const from = waypoints[i];
-    const to = waypoints[i + 1];
+    const from = workingWaypoints[i];
+    let to = workingWaypoints[i + 1];
     
     // Update progress
     if (onProgress) {
-      onProgress(i + 1, totalSegments);
+      onProgress(i + 1, totalSegments, `Calculating route ${i + 1} → ${i + 2}`);
     }
     
     try {
       const segmentData = await calculateRoute(from, to, profile);
+      // Use waypoint ID if available, otherwise use order (which should be stable)
+      const fromId = from.id || (from.order !== undefined ? from.order.toString() : i.toString());
+      const toId = to.id || (to.order !== undefined ? to.order.toString() : (i + 1).toString());
       segments.push({
-        fromWaypointId: from.id || from.order?.toString() || i.toString(),
-        toWaypointId: to.id || to.order?.toString() || (i + 1).toString(),
+        fromWaypointId: fromId,
+        toWaypointId: toId,
         polyline: segmentData.polyline,
         distance: segmentData.distance,
         duration: segmentData.duration
       });
     } catch (error) {
-      console.warn(`Failed to calculate route segment ${i} → ${i + 1}:`, error);
-      errors.push({
-        from: from.name || `Waypoint ${i + 1}`,
-        to: to.name || `Waypoint ${i + 2}`,
-        error: error.message
-      });
-      // Continue with other segments even if one fails
+      // Check if this is a "no route" error that might benefit from fallback
+      if (error.isNoRouteError) {
+        // Attempt fallback routing
+        if (onProgress) {
+          onProgress(i + 1, totalSegments, `No route found, searching for alternative...`);
+        }
+        
+        try {
+          const fallbackResult = await findRoutableCoordinate(
+            from,
+            to,
+            profile,
+            1000, // stepSize - increased to reduce API calls
+            (attempt, distance) => {
+              if (onProgress) {
+                onProgress(i + 1, totalSegments, `Trying alternative at ${Math.round(distance)}m...`);
+              }
+            }
+          );
+          
+          if (fallbackResult.success && fallbackResult.adjustedCoordinate) {
+            // Store original coordinates
+            const originalCoordinates = { lat: to.lat, lng: to.lng };
+            
+            // Update waypoint with adjusted coordinates
+            to.lat = fallbackResult.adjustedCoordinate.lat;
+            to.lng = fallbackResult.adjustedCoordinate.lng;
+            to.adjusted = true;
+            to.originalCoordinates = originalCoordinates;
+            
+            // Update working waypoints array
+            workingWaypoints[i + 1] = to;
+            
+            // Use waypoint ID if available, otherwise use order (which should be stable)
+            const toId = to.id || (to.order !== undefined ? to.order.toString() : (i + 1).toString());
+            const fromId = from.id || (from.order !== undefined ? from.order.toString() : i.toString());
+            
+            // Record adjusted waypoint for return
+            adjustedWaypoints.push({
+              waypointId: toId,
+              original: originalCoordinates,
+              adjusted: fallbackResult.adjustedCoordinate,
+              attempts: fallbackResult.attempts
+            });
+            
+            // Try routing again with adjusted coordinate
+            try {
+              const segmentData = await calculateRoute(from, to, profile);
+              segments.push({
+                fromWaypointId: fromId,
+                toWaypointId: toId,
+                polyline: segmentData.polyline,
+                distance: segmentData.distance,
+                duration: segmentData.duration
+              });
+              
+              if (onProgress) {
+                onProgress(i + 1, totalSegments, `Route found with adjusted waypoint`);
+              }
+            } catch (retryError) {
+              // Even with adjusted coordinate, routing failed
+              console.warn(`Failed to calculate route segment ${i} → ${i + 1} even after fallback:`, retryError);
+              errors.push({
+                from: from.name || `Waypoint ${i + 1}`,
+                to: to.name || `Waypoint ${i + 2}`,
+                error: retryError.message,
+                fallbackAttempted: true
+              });
+            }
+          } else {
+            // Fallback search exhausted - no routable coordinate found
+            console.warn(`No routable coordinate found for segment ${i} → ${i + 1} after ${fallbackResult.attempts} attempts`);
+            errors.push({
+              from: from.name || `Waypoint ${i + 1}`,
+              to: to.name || `Waypoint ${i + 2}`,
+              error: error.message,
+              fallbackAttempted: true,
+              fallbackAttempts: fallbackResult.attempts
+            });
+          }
+        } catch (fallbackError) {
+          // Fallback logic itself failed
+          console.error(`Fallback routing failed for segment ${i} → ${i + 1}:`, fallbackError);
+          errors.push({
+            from: from.name || `Waypoint ${i + 1}`,
+            to: to.name || `Waypoint ${i + 2}`,
+            error: error.message,
+            fallbackAttempted: true,
+            fallbackError: fallbackError.message
+          });
+        }
+      } else {
+        // Not a "no route" error - don't attempt fallback
+        console.warn(`Failed to calculate route segment ${i} → ${i + 1}:`, error);
+        errors.push({
+          from: from.name || `Waypoint ${i + 1}`,
+          to: to.name || `Waypoint ${i + 2}`,
+          error: error.message
+        });
+      }
     }
   }
 
@@ -256,7 +447,10 @@ export async function calculateRouteSegments(waypoints, profile = DEFAULT_ROUTIN
     throw new Error(`All route segments failed. First error: ${errors[0].error}`);
   }
 
-  return segments;
+  return {
+    segments,
+    adjustedWaypoints
+  };
 }
 
 /**

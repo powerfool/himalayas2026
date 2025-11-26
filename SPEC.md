@@ -209,6 +209,36 @@ A local web application for visualizing motorbike routes in the Indian Himalayas
 - Fallback to straight line between waypoints
 - Allow retry
 
+### Waypoint Fallback Routing (New Feature)
+When OpenRouteService cannot find a route within 350 meters of a waypoint (waypoint B), the system should automatically attempt to find the closest routable coordinate on the straight line between the previous waypoint (A) and the problematic waypoint (B).
+
+**Algorithm:**
+1. Detect routing failure for segment A→B (when OpenRouteService returns error indicating no route found within 350m)
+2. Calculate straight line between waypoint A and waypoint B
+3. Start at a point 100 meters away from B (toward A) on this line
+4. Attempt to route from A to this test coordinate
+5. If routing succeeds, use this coordinate as the adjusted waypoint B
+6. If routing fails, increase distance by 100 meters (200m, 300m, 400m, etc.) and retry
+7. Continue until a routable coordinate is found or maximum distance is reached (e.g., halfway between A and B)
+8. If successful, replace waypoint B coordinates with the adjusted coordinates
+9. Store original waypoint B coordinates for reference (optional: mark as adjusted)
+
+**Implementation Details:**
+- Add utility function to calculate coordinate on line at specific distance: `calculatePointOnLine(from, to, distanceFromTo)`
+- Add utility function to calculate distance between two coordinates (Haversine formula)
+- Modify `calculateRouteSegments` to catch routing failures and trigger fallback logic
+- Add new function `findRoutableCoordinate(from, to, stepSize = 100, maxDistance = null)` that implements the search algorithm
+- Update waypoint data structure to optionally track if coordinates were adjusted (for future UI indication)
+
+**Edge Cases:**
+- If no routable coordinate found within reasonable distance, fall back to original error handling
+- Maximum search distance should be half the straight-line distance between A and B (not configurable)
+- Rate limiting: each fallback attempt is a new API call, so respect API limits
+- Progress indication: show user that fallback routing is in progress
+
+**Data Structure Changes:**
+- Waypoint: Add optional `adjusted: boolean` flag and `originalCoordinates: {lat, lng}` if adjusted
+
 ### Storage Failures
 - Show error message
 - Provide export option to save data manually

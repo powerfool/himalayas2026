@@ -7,7 +7,7 @@ const ORS_API_BASE = 'https://api.openrouteservice.org/v2';
 // Default routing profile for Himalayan routes
 // Valid profiles: 'driving-car', 'driving-hgv', 'cycling-regular', 'cycling-road', 
 // 'cycling-mountain', 'cycling-electric', 'foot-walking', 'foot-hiking', 'wheelchair'
-export const DEFAULT_ROUTING_PROFILE = 'foot-walking';
+export const DEFAULT_ROUTING_PROFILE = 'driving-car';
 
 /**
  * Get OpenRouteService API key from environment variable

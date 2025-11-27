@@ -4,21 +4,25 @@ A local web application for planning and visualizing motorbike routes in the Ind
 
 ## Current Status
 
-**Phases 0-5 Complete** - Full MVP with segment visualization!
+**Phases 0-9 Complete** - Full MVP with enhanced segment visualization and interaction!
 
 **What works right now:**
 - Route creation with Anthropic Claude LLM waypoint extraction
+- **Location autocomplete** - Suggestions appear as you type in waypoint input and ambiguity resolution search
+- **Smart geocoding** - Batch geocode all waypoints or geocode individual waypoints with one click
 - Geocoding via Nominatim with ambiguity resolution UI
 - Manual coordinate entry for failed/no-result geocoding
 - Route segment calculation (individual segments between waypoint pairs)
-- Progress tracking during segment calculation
+- **Automatic waypoint fallback routing** - When routing fails within 350m, system automatically searches for closest routable coordinate (starts 1000m from problematic waypoint, increases by 1000m steps)
+- Progress tracking during segment calculation and fallback routing attempts
 - Map visualization with distinct colors per segment
 - Numbered waypoint markers showing sequence
+- **Segment length hover tooltips** - Hover over any segment to see its distance (e.g., "125.3 km" or "850 m")
+- **Interactive segment highlighting** - Segments become thicker and more prominent when hovered
+- **Coordinates preserved from autocomplete** - Selecting a location from autocomplete automatically includes coordinates (no geocoding needed)
 - IndexedDB persistent storage (with automatic localStorage migration)
 
-**Try it:** `npm run dev` → Create new route → Paste itinerary → Click "Extract Waypoints" → Click "Geocode Waypoints" (resolve ambiguities if needed) → Calculate Route → See colored segments on map!
-
-**Next:** Phase 6 - Polish & Error Handling (optional improvements)
+**Try it:** `npm run dev` → Create new route → Paste itinerary → Click "Extract Waypoints" → Type location names with autocomplete suggestions → Click "Geocode Waypoints" (or geocode individual waypoints) → Calculate Route → System automatically handles unreachable waypoints → Hover over colored segments to see distances!
 
 ## Setup
 
@@ -37,11 +41,19 @@ VITE_ORS_API_KEY=your_ors_key_here
 ## Features
 
 - **Route Management**: Create, edit, and save multiple routes with persistent storage
-- **Itinerary Parsing**: Automatically extract location names from pasted itinerary text
+- **Itinerary Parsing**: Automatically extract location names from pasted itinerary text using Anthropic Claude LLM
 - **Interactive Map**: Visualize routes on OpenStreetMap with waypoint markers and route polylines
-- **Geocoding**: Convert location names to coordinates using OpenStreetMap Nominatim
+- **Segment Visualization**: Each route segment displayed in distinct colors for easy identification
+- **Segment Length Tooltips**: Hover over any segment line to see its distance (formatted as km or m)
+- **Interactive Segment Highlighting**: Segments become thicker and more prominent when hovered for better visibility
+- **Geocoding**: Convert location names to coordinates using OpenStreetMap Nominatim with ambiguity resolution
+- **Location Autocomplete**: Get location suggestions as you type in waypoint editor and ambiguity resolution modal (debounced search, keyboard/mouse navigation)
+- **Single Waypoint Geocoding**: Geocode individual waypoints without geocoding all (click "Geocode" link next to ungeocoded waypoints)
 - **Route Calculation**: Calculate routes between waypoints using OpenRouteService API
+- **Smart Waypoint Fallback Routing**: Automatically finds closest routable coordinate when waypoint is unreachable within 350m (searches along straight line, starts 1000m from problematic waypoint)
+- **Coordinate Preservation**: Selecting a location from autocomplete automatically includes coordinates, avoiding unnecessary geocoding
 - **Waypoint Editor**: Manually add, edit, reorder, and remove waypoints
+- **Progress Tracking**: Visual progress indicators during waypoint extraction, geocoding, and route calculation
 
 ## Getting Started
 
@@ -70,12 +82,20 @@ npm run dev
 2. **Enter Route Details**: 
    - Enter a route name
    - Paste your itinerary text in the text area
-3. **Parse Locations**: Click "Parse Locations from Text" to extract location names
-4. **Geocode Waypoints**: Click "Geocode Waypoints" to convert location names to coordinates
-5. **Calculate Route**: Click "Calculate Route" to generate the route polyline
-6. **Save Route**: Click "Save Route" to persist your work
+3. **Extract Waypoints**: Click "Extract Waypoints" to automatically extract location names using LLM
+4. **Add Waypoints Manually** (optional):
+   - Type location names in the waypoint input - autocomplete suggestions appear as you type
+   - Select a suggestion to automatically include coordinates (no geocoding needed)
+   - Or type a name and click "Add" to add it for later geocoding
+5. **Geocode Waypoints**: 
+   - Click "Geocode Waypoints" to batch geocode all ungeocoded waypoints
+   - Or click "Geocode" link next to individual waypoints to geocode one at a time
+   - Resolve ambiguities when multiple locations are found
+   - Use autocomplete in the search field when searching with different names
+6. **Calculate Route**: Click "Calculate Route" - system automatically handles unreachable waypoints by finding closest routable coordinates
+7. **Save Route**: Click "Save Route" to persist your work
 
-You can also manually add waypoints using the waypoint editor, and edit existing routes by clicking on them in the library view.
+You can edit existing routes by clicking on them in the library view.
 
 ## Technology Stack
 

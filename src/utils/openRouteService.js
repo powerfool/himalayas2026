@@ -68,6 +68,58 @@ function getORSAPIKey() {
 }
 
 /**
+ * Search for locations using Nominatim (OpenStreetMap) - optimized for autocomplete
+ * Returns suggestions as user types, sorted by importance
+ * @param {string} query - Partial search query (what user is typing)
+ * @param {string} countryCode - Optional country code (e.g., 'IN' for India)
+ * @param {number} limit - Maximum number of suggestions to return (default: 5)
+ * @returns {Promise<{candidates: Array<{lat: number, lng: number, display_name: string, importance: number, type: string, class: string}>}>}
+ */
+export async function searchLocations(query, countryCode = 'IN', limit = 5) {
+  if (!query || query.trim().length < 2) {
+    return { candidates: [] };
+  }
+
+  try {
+    const searchQuery = query.trim();
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery + (countryCode ? ', ' + countryCode : ''))}&limit=${limit}&dedupe=1`;
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'HimalayasRouteVisualizer/1.0'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Search failed: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    if (!data || data.length === 0) {
+      return { candidates: [] };
+    }
+
+    // Return candidates sorted by importance (higher importance first)
+    const candidates = data
+      .map(result => ({
+        lat: parseFloat(result.lat),
+        lng: parseFloat(result.lon),
+        display_name: result.display_name,
+        importance: result.importance || 0,
+        type: result.type || '',
+        class: result.class || ''
+      }))
+      .sort((a, b) => (b.importance || 0) - (a.importance || 0));
+
+    return { candidates };
+  } catch (error) {
+    console.error('Location search error:', error);
+    throw error;
+  }
+}
+
+/**
  * Geocode a location name to coordinates using Nominatim (OpenStreetMap)
  * Returns all candidates for ambiguity resolution
  * @param {string} locationName - Name of the location

@@ -352,6 +352,159 @@ Reference: See `SPEC.md` for detailed requirements and architecture.
 
 ---
 
+## Phase 8: Waypoint Input Autocomplete
+
+**Goal:** Add autocomplete suggestions to waypoint input fields to help users quickly find and select locations as they type, available in both the waypoint editor and ambiguity resolution modal.
+
+**Files:**
+- `src/utils/openRouteService.js` (modify - add search function for autocomplete)
+- `src/components/WaypointEditor.jsx` (modify - add autocomplete to input field)
+- `src/components/AmbiguityResolution.jsx` (modify - add autocomplete to search input)
+- `src/components/AutocompleteInput.jsx` (new - reusable autocomplete component)
+
+**Tasks:**
+1. Add `searchLocations` function to `openRouteService.js`:
+   - Similar to `geocodeLocation` but optimized for autocomplete
+   - Query Nominatim search endpoint with partial query string
+   - Return up to 5 suggestions sorted by importance
+   - Same response format as `geocodeLocation` for consistency
+   - Include debouncing logic or return promise for caller to debounce
+   - Respect Nominatim rate limit (1 request/second)
+2. Create reusable `AutocompleteInput.jsx` component:
+   - Accepts: `value`, `onChange`, `onSelect`, `placeholder`, `disabled`, `onSearch` callback
+   - Manages: input value, suggestions list, selected index, dropdown visibility, loading state
+   - Implements debouncing (300-500ms delay) before calling search
+   - Shows dropdown below input when suggestions available
+   - Handles keyboard navigation: Arrow Up/Down to navigate, Enter to select, Escape to close
+   - Handles mouse interaction: hover highlight, click to select
+   - Closes dropdown on: selection, Escape key, click outside, blur
+   - Shows loading indicator in dropdown while fetching
+   - Displays suggestion with: display_name, type/class if available
+   - Handles errors gracefully (hide dropdown, show message, or silent fail)
+   - Styled consistently with existing UI (white background, border, shadow)
+3. Integrate `AutocompleteInput` into `WaypointEditor.jsx`:
+   - Replace plain input with `AutocompleteInput` component
+   - Pass `onSearch` callback that calls `searchLocations`
+   - On suggestion select: fill input value, optionally auto-add waypoint with coordinates
+   - Maintain existing "Add" button functionality
+   - Preserve Enter key behavior (add waypoint on Enter)
+4. Integrate `AutocompleteInput` into `AmbiguityResolution.jsx`:
+   - Replace search input field with `AutocompleteInput` component
+   - Pass `onSearch` callback that calls `searchLocations`
+   - On suggestion select: fill input value, trigger search automatically (or show button to search)
+   - Maintain existing search button functionality
+   - Preserve Enter key behavior (trigger search on Enter)
+5. Handle edge cases:
+   - User types very fast - debouncing prevents excessive API calls
+   - No results found - show "No suggestions" or hide dropdown gracefully
+   - Network error - hide dropdown, don't block input
+   - Rate limit exceeded - queue requests or show message
+   - User selects suggestion then continues typing - clear selection, show new suggestions
+   - Very long location names - truncate in dropdown with ellipsis
+   - Special characters - properly encode for URL
+
+**Done means:**
+- User can type in waypoint input field and see autocomplete suggestions appear
+- Suggestions appear in dropdown below input after 300-500ms delay
+- User can navigate suggestions with arrow keys and select with Enter
+- User can click suggestions with mouse to select
+- Selecting suggestion fills input field
+- Autocomplete works in both WaypointEditor and AmbiguityResolution modal
+- Rate limiting respected (debouncing helps, but may need request queuing)
+- Errors handled gracefully without breaking input functionality
+- UI consistent with existing design patterns
+
+**Test it:**
+1. **WaypointEditor autocomplete:**
+   - Open route editor
+   - Start typing in waypoint input field (e.g., "Leh")
+   - Verify suggestions dropdown appears after short delay
+   - Verify suggestions show location names
+   - Use arrow keys to navigate suggestions
+   - Press Enter to select suggestion
+   - Verify input field is filled with selected location
+   - Click "Add" button - verify waypoint added
+   - Test mouse interaction: click suggestion to select
+   - Test Escape key closes dropdown
+   - Test clicking outside closes dropdown
+   - Test with no results (type "xyz123nonexistent") - verify graceful handling
+
+2. **AmbiguityResolution autocomplete:**
+   - Create route with ambiguous waypoint (e.g., "Leh" might have multiple results)
+   - When ambiguity modal appears, click "Search with Different Name"
+   - Start typing in search input field
+   - Verify suggestions dropdown appears
+   - Select suggestion
+   - Verify input filled and search can be triggered
+   - Test keyboard and mouse navigation same as above
+
+3. **Edge cases:**
+   - Type very fast - verify debouncing prevents excessive API calls
+   - Test with network offline - verify graceful error handling
+   - Test with special characters in search (e.g., "São Paulo")
+   - Test with very long location names - verify truncation in dropdown
+
+---
+
+## Phase 9: Segment Length Hover Tooltip
+
+**Goal:** Display segment distance information when user hovers over route segment lines on the map, helping users quickly understand segment lengths without inspecting waypoint details.
+
+**Files:**
+- `src/utils/geoUtils.js` (modify - add distance formatting utility)
+- `src/components/MapView.jsx` (modify - add tooltips to segment polylines)
+
+**Tasks:**
+1. Add `formatDistance(meters)` function to `geoUtils.js`:
+   - Accept distance in meters (number)
+   - Return formatted string: "125.3 km" for values >= 1000m, "850 m" for values < 1000m
+   - Format with 1 decimal place for km, no decimals for m
+   - Remove trailing zeros (e.g., "125.0 km" becomes "125 km")
+   - Handle invalid/zero values: return null or empty string
+   - Handle missing values: return null
+2. Modify `MapView.jsx`:
+   - Import `Tooltip` component from react-leaflet
+   - Import `formatDistance` from `geoUtils.js`
+   - For each segment Polyline, wrap with `Tooltip` component
+   - Set tooltip content to formatted distance using `formatDistance(segment.distance)`
+   - Handle segments without distance: show "Distance not available" or don't show tooltip
+   - Handle invalid distance (0 or null): don't show tooltip
+   - Use Leaflet's default tooltip styling (no custom styling needed)
+   - Set tooltip to appear on hover (default behavior)
+   - Handle overlapping segments: Leaflet will show tooltip for segment directly under cursor (acceptable behavior per spec)
+3. Test tooltip behavior:
+   - Tooltip appears when hovering over segment line
+   - Tooltip shows correct formatted distance
+   - Tooltip disappears when mouse moves away
+   - Tooltip doesn't interfere with map panning/zooming
+   - Segments without distance handled gracefully
+
+**Done means:**
+- User hovers over any route segment line on map
+- Tooltip appears showing formatted distance (e.g., "125.3 km" or "850 m")
+- Tooltip disappears when cursor moves away
+- Segments without distance data handled gracefully
+- Tooltip doesn't interfere with map interactions
+
+**Test it:**
+1. Load or create a route with multiple segments (at least 3 waypoints)
+2. Verify route segments display on map with different colors
+3. Hover mouse cursor over a segment line
+4. Verify tooltip appears showing distance (e.g., "125.3 km")
+5. Move cursor along segment line - verify tooltip follows
+6. Move cursor away from segment - verify tooltip disappears
+7. Test with segment that has distance < 1km - verify shows in meters (e.g., "850 m")
+8. Test with segment that has distance >= 1km - verify shows in kilometers (e.g., "125.3 km")
+9. Test formatting: verify no trailing zeros (e.g., "125 km" not "125.0 km")
+10. Test edge cases:
+    - Segment with distance = 0 - verify no tooltip appears
+    - Segment with missing distance property - verify shows "Distance not available" or no tooltip
+    - Multiple segments overlapping - verify tooltip shows for segment under cursor
+11. Verify tooltip doesn't prevent map panning/zooming
+12. Verify tooltip styling matches Leaflet defaults (white background, dark text, shadow)
+
+---
+
 ## Success Criteria
 
 MVP complete when:
@@ -362,6 +515,8 @@ MVP complete when:
 5. ✅ User can iterate on routes over multiple sessions
 6. ✅ All error cases handled gracefully
 7. ✅ Waypoint fallback routing automatically handles unreachable waypoints
+8. ✅ Autocomplete suggestions help users quickly find locations in waypoint input and ambiguity resolution
+9. ✅ Hovering over segment lines shows distance tooltips with formatted values
 
 ## Notes
 

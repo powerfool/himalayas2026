@@ -147,6 +147,15 @@ A local web application for visualizing motorbike routes in the Indian Himalayas
 - "Select" button for each candidate
 - "Manual Entry" option for coordinates
 
+### WaypointInputAutocomplete (New Component)
+- Text input with autocomplete dropdown
+- Debounced search as user types
+- Suggestions list with location names and types
+- Keyboard navigation (arrow keys, Enter, Escape)
+- Mouse interaction for selection
+- Loading state during search
+- Error handling for API failures
+
 ## API Integrations
 
 ### Anthropic Claude API
@@ -159,11 +168,12 @@ A local web application for visualizing motorbike routes in the Indian Himalayas
 
 ### Nominatim (OpenStreetMap Geocoding)
 - **Endpoint**: `https://nominatim.openstreetmap.org/search`
-- **Purpose**: Convert place names to coordinates
-- **Input**: Place name string
+- **Purpose**: Convert place names to coordinates, provide location search suggestions
+- **Input**: Place name string (for geocoding) or partial search query (for autocomplete)
 - **Output**: Array of candidate locations with coordinates
-- **Rate Limiting**: Respect 1 request/second limit
+- **Rate Limiting**: Respect 1 request/second limit (critical for autocomplete - use debouncing and request queuing)
 - **Error Handling**: Handle no results, show manual entry option
+- **Autocomplete Usage**: Same endpoint, called with debouncing as user types, limit results to 5 suggestions
 
 ### OpenRouteService
 - **Endpoint**: `https://api.openrouteservice.org/v2/directions/driving-car`
@@ -239,6 +249,120 @@ When OpenRouteService cannot find a route within 350 meters of a waypoint (waypo
 **Data Structure Changes:**
 - Waypoint: Add optional `adjusted: boolean` flag and `originalCoordinates: {lat, lng}` if adjusted
 
+### Waypoint Input Autocomplete (New Feature)
+Add autocomplete suggestions to location input fields to help users quickly find and select locations as they type. Available in two places: the waypoint input field in WaypointEditor (for manually adding waypoints) and the search input field in AmbiguityResolution modal (for searching with different names when geocoding fails).
+
+**User Flow:**
+1. User starts typing in the waypoint input field
+2. After a short delay (debounce), system queries Nominatim search API
+3. Suggestions dropdown appears below input showing matching locations
+4. User can navigate suggestions with keyboard (arrow keys, Enter) or mouse
+5. Selecting a suggestion fills the input and optionally auto-adds the waypoint with coordinates
+6. User can continue typing to refine search or ignore suggestions
+
+**Implementation Details:**
+- Add debounced search function that queries Nominatim search endpoint as user types
+- Debounce delay: 300-500ms to balance responsiveness with API rate limits
+- Show suggestions dropdown below input field when results available
+- Display up to 5 suggestions (limit to respect API and keep UI clean)
+- Each suggestion shows: location name (display_name), type/class if available
+- Suggestions sorted by importance (Nominatim provides importance score)
+- Handle keyboard navigation: Arrow Up/Down to navigate, Enter to select, Escape to close
+- Handle mouse interaction: Click to select suggestion
+- Close dropdown when: suggestion selected, user clicks outside, Escape pressed, input loses focus
+- Respect Nominatim rate limit: 1 request/second (debouncing helps, but may need request queuing)
+- Show loading indicator in dropdown while fetching suggestions
+- Handle errors gracefully: show "No suggestions found" or hide dropdown on error
+
+**UI/UX Requirements:**
+- Dropdown positioned directly below input field
+- Dropdown styled consistently with existing UI (white background, border, shadow)
+- Highlighted suggestion on hover/keyboard navigation
+- Selected suggestion visually distinct (background color change)
+- Input field remains functional - user can continue typing even with dropdown open
+- Option to auto-add waypoint on selection (with coordinates pre-filled) OR just fill input
+- Show location type/class in suggestion if available (e.g., "city", "village", "pass")
+
+**Integration Points:**
+- Create reusable `AutocompleteInput` component for both locations
+- Extend `WaypointEditor` component to use `AutocompleteInput` for waypoint input field
+- Extend `AmbiguityResolution` component to use `AutocompleteInput` for search input field
+- Create new `searchLocations` function in `openRouteService.js` (or extend `geocodeLocation`)
+- New function should return same candidate format for consistency
+- Optionally pre-fill coordinates when suggestion selected in WaypointEditor (skip geocoding step)
+- In AmbiguityResolution, selecting suggestion fills input and can trigger search automatically
+
+**Edge Cases:**
+- User types very fast - debouncing prevents excessive API calls
+- No results found - show "No suggestions" message or hide dropdown
+- Network error - hide dropdown gracefully, don't block input
+- Rate limit exceeded - queue requests or show message, don't break input
+- User selects suggestion then continues typing - clear selection, show new suggestions
+- Very long location names - truncate in dropdown with ellipsis, show full name on hover
+- Special characters in search - properly encode for URL
+
+**Out of Scope (Parking Lot):**
+- Recent searches/history (future enhancement)
+- Favorite locations (future enhancement)
+- Search by coordinates (already supported via manual entry)
+- Multi-language support (future enhancement)
+- Search filters (country, type, etc.) - keep simple for MVP
+
+### Segment Length Hover Tooltip (New Feature)
+Display segment distance information when user hovers over route segment lines on the map. This helps users quickly understand the length of each segment without needing to inspect waypoint details or calculate manually.
+
+**User Flow:**
+1. User views route on map with multiple colored segment lines
+2. User hovers mouse cursor over any segment line
+3. Tooltip appears near cursor showing segment distance (e.g., "125.3 km" or "78.2 mi")
+4. Tooltip follows cursor movement while hovering over segment
+5. Tooltip disappears when cursor moves away from segment
+
+**Implementation Details:**
+- Use Leaflet's `Tooltip` component from react-leaflet for each Polyline
+- Attach tooltip to segment polylines using `eventHandlers` prop
+- Format distance from meters to user-friendly units (km for >1km, m for <1km)
+- Display distance with 1 decimal place precision
+- Use segment's existing `distance` property (already available in segment data structure)
+- Tooltip should appear with minimal delay (50-100ms) for responsive feel
+- Position tooltip near cursor but offset to avoid obscuring segment line
+- Handle segments without distance data gracefully (show "Distance unknown" or hide tooltip)
+
+**UI/UX Requirements:**
+- Tooltip styled consistently with Leaflet default tooltips (white background, dark text, shadow)
+- Font size: 12-14px for readability
+- Show distance in kilometers (km) for values >= 1km, meters (m) for values < 1km
+- Format: "125.3 km" or "850 m" (no trailing zeros, 1 decimal place max)
+- Tooltip appears on hover, disappears on mouseout
+- Tooltip positioned dynamically to stay visible within map bounds
+- Optional: Show duration if available (e.g., "125.3 km (2h 15m)") - only if duration data exists
+- Tooltip should not interfere with map interactions (panning, zooming)
+
+**Integration Points:**
+- Extend `MapView.jsx` component to add Tooltip to each Polyline segment
+- Use react-leaflet's `Tooltip` component (already available via react-leaflet)
+- Access segment distance from `segment.distance` property (already in data structure)
+- Create utility function `formatDistance(meters)` in `geoUtils.js` for consistent formatting
+- Tooltip content: format distance using utility function
+- Handle edge case: segments without distance property (calculated routes should always have distance, but handle gracefully)
+
+**Edge Cases:**
+- Segment has no distance data - show "Distance not available"
+- Distance is 0 or invalid - don't show tooltip
+- Multiple segments overlap at same point - show length of both segments in the same tooltip
+- User hovers very quickly - tooltip should appear/disappear smoothly without flickering
+- Map is zoomed out with many segments - tooltip still works but may be harder to target specific segments
+- Segment polyline is very short - tooltip still appears but may be harder to hover
+
+**Out of Scope (Parking Lot):**
+- Click interaction to show permanent segment info panel
+- Segment duration display (unless already in data structure)
+- Segment elevation profile on hover
+- Segment statistics (average speed, etc.)
+- Custom tooltip styling beyond Leaflet defaults
+- Tooltip animations/transitions
+- Selecting between metric and imperial
+
 ### Storage Failures
 - Show error message
 - Provide export option to save data manually
@@ -277,8 +401,11 @@ When OpenRouteService cannot find a route within 350 meters of a waypoint (waypo
 
 ### Extend
 - `RouteEditor.jsx`: Add LLM extraction flow
-- `MapView.jsx`: Add segment visualization
+- `MapView.jsx`: Add segment visualization, add hover tooltips for segment distances
 - Add ambiguity resolution UI component
+- `WaypointEditor.jsx`: Add autocomplete functionality to waypoint input
+- `openRouteService.js`: Add location search function for autocomplete (or extend geocodeLocation)
+- `geoUtils.js`: Add distance formatting utility function
 
 ## Success Criteria
 

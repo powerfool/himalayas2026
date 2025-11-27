@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
+import { searchLocations } from '../utils/openRouteService';
+import AutocompleteInput from './AutocompleteInput';
 
 /**
  * WaypointEditor component - Manual waypoint entry/editing
@@ -10,20 +12,45 @@ import { v4 as uuidv4 } from 'uuid';
  */
 export default function WaypointEditor({ waypoints = [], onWaypointsChange, onGeocodeWaypoint = null, isGeocoding = false }) {
   const [newLocationName, setNewLocationName] = useState('');
+  const [selectedCandidate, setSelectedCandidate] = useState(null); // Store selected candidate with coordinates
 
   const handleAddWaypoint = () => {
     if (!newLocationName.trim()) return;
     
+    // If a candidate was selected, use its coordinates and display_name
+    // Otherwise, use the input value as name and set coordinates to 0 (needs geocoding)
     const newWaypoint = {
       id: uuidv4(),
-      name: newLocationName.trim(),
-      lat: 0,
-      lng: 0,
-      order: waypoints.length
+      name: selectedCandidate ? selectedCandidate.display_name : newLocationName.trim(),
+      lat: selectedCandidate?.lat || 0,
+      lng: selectedCandidate?.lng || 0,
+      order: waypoints.length,
+      display_name: selectedCandidate?.display_name || null
     };
     
     onWaypointsChange([...waypoints, newWaypoint]);
     setNewLocationName('');
+    setSelectedCandidate(null); // Clear selected candidate
+  };
+
+  const handleSuggestionSelect = (candidate) => {
+    // When user selects a suggestion, store the candidate with coordinates
+    // Use the display_name as the input value to ensure exact match
+    setNewLocationName(candidate.display_name);
+    setSelectedCandidate(candidate);
+  };
+
+  const handleInputChange = (value) => {
+    setNewLocationName(value);
+    // Only clear selected candidate if user manually edits the input to something different
+    // This allows user to see the full display_name but still use coordinates if they don't change it
+    if (selectedCandidate && value.trim() !== selectedCandidate.display_name.trim()) {
+      setSelectedCandidate(null);
+    }
+  };
+
+  const handleSearch = async (query) => {
+    return await searchLocations(query, 'IN', 5);
   };
 
   const handleRemoveWaypoint = (index) => {
@@ -60,24 +87,31 @@ export default function WaypointEditor({ waypoints = [], onWaypointsChange, onGe
       <h3 style={{ marginBottom: '12px' }}>Waypoints</h3>
       
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-        <input
-          type="text"
-          value={newLocationName}
-          onChange={(e) => setNewLocationName(e.target.value)}
-          onKeyPress={(e) => {
-            if (e.key === 'Enter') {
-              handleAddWaypoint();
-            }
-          }}
-          placeholder="Enter location name"
-          style={{
-            flex: 1,
-            padding: '8px',
-            border: '1px solid #d1d5db',
-            borderRadius: '4px',
-            fontSize: '14px'
-          }}
-        />
+        <div style={{ flex: 1 }}>
+          <AutocompleteInput
+            value={newLocationName}
+            onChange={handleInputChange}
+            onSelect={handleSuggestionSelect}
+            onSearch={handleSearch}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                handleAddWaypoint();
+              }
+            }}
+            placeholder="Enter location name"
+            debounceMs={400}
+          />
+          {selectedCandidate && (
+            <div style={{
+              marginTop: '4px',
+              fontSize: '12px',
+              color: '#10b981',
+              fontStyle: 'italic'
+            }}>
+              ✓ Coordinates available from selection
+            </div>
+          )}
+        </div>
         <button
           onClick={handleAddWaypoint}
           style={{

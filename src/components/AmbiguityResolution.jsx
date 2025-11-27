@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { searchLocations } from '../utils/openRouteService';
+import AutocompleteInput from './AutocompleteInput';
 
 /**
  * AmbiguityResolution component - UI for resolving geocoding ambiguities
@@ -71,6 +73,17 @@ export default function AmbiguityResolution({
       // Error handling is done in parent component
       // Component will show searchError prop if provided
     }
+  };
+
+  const handleAutocompleteSearch = async (query) => {
+    return await searchLocations(query, 'IN', 5);
+  };
+
+  const handleSuggestionSelect = (candidate) => {
+    // When user selects a suggestion, fill the input and optionally trigger search
+    setSearchName(candidate.display_name);
+    // Optionally auto-trigger search when suggestion is selected
+    // For now, user can still click "Search" button or press Enter
   };
 
   return (
@@ -357,28 +370,19 @@ export default function AmbiguityResolution({
               <label style={{ display: 'block', marginBottom: '4px', fontSize: '14px', fontWeight: '500' }}>
                 Location Name
               </label>
-              <input
-                type="text"
+              <AutocompleteInput
                 value={searchName}
-                onChange={(e) => setSearchName(e.target.value)}
-                placeholder="e.g., Leh, Ladakh, India"
-                disabled={isSearching}
+                onChange={setSearchName}
+                onSelect={handleSuggestionSelect}
+                onSearch={handleAutocompleteSearch}
                 onKeyPress={(e) => {
                   if (e.key === 'Enter' && searchName.trim() && !isSearching) {
                     handleSearch();
                   }
                 }}
-                style={{
-                  width: '100%',
-                  padding: '8px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '4px',
-                  fontSize: '14px',
-                  boxSizing: 'border-box',
-                  backgroundColor: isSearching ? '#f3f4f6' : 'white',
-                  cursor: isSearching ? 'not-allowed' : 'text'
-                }}
-                autoFocus
+                placeholder="e.g., Leh, Ladakh, India"
+                disabled={isSearching}
+                debounceMs={400}
               />
             </div>
             

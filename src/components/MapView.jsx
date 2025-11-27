@@ -13,45 +13,6 @@ L.Icon.Default.mergeOptions({
 });
 
 /**
- * Component for polyline segment with tooltip that follows mouse cursor
- */
-function SegmentWithTooltip({ positions, color, tooltipText }) {
-  const polylineRef = useRef(null);
-
-  useEffect(() => {
-    if (!polylineRef.current || !tooltipText) return;
-
-    const polyline = polylineRef.current.leafletElement;
-    
-    // Create tooltip that follows mouse using Leaflet's sticky option
-    const tooltip = L.tooltip({
-      permanent: false,
-      direction: 'auto',
-      sticky: true, // Makes tooltip follow mouse cursor
-      interactive: false
-    });
-    tooltip.setContent(tooltipText);
-    polyline.bindTooltip(tooltip);
-
-    return () => {
-      if (polyline && tooltip) {
-        polyline.unbindTooltip();
-      }
-    };
-  }, [positions, color, tooltipText]);
-
-  return (
-    <Polyline
-      ref={polylineRef}
-      positions={positions}
-      color={color}
-      weight={4}
-      opacity={0.7}
-    />
-  );
-}
-
-/**
  * Component to fit map bounds to waypoints and route segments
  */
 function FitBounds({ waypoints, segments, routePolyline }) {
@@ -180,14 +141,35 @@ export default function MapView({ waypoints = [], routePolyline = [], segments =
             
             // Format distance for tooltip
             const distanceText = formatDistance(segment.distance);
+            const tooltipContent = distanceText || (segment.distance != null ? 'Distance not available' : null);
             
             return (
-              <SegmentWithTooltip
+              <Polyline
                 key={`segment-${index}-${segment.fromWaypointId}-${segment.toWaypointId}`}
                 positions={validPolyline}
                 color={segmentColors[index % segmentColors.length]}
-                tooltipText={distanceText || (segment.distance != null ? 'Distance not available' : null)}
-              />
+                weight={4}
+                opacity={0.7}
+                eventHandlers={{
+                  mousemove: (e) => {
+                    // Update tooltip position to follow mouse
+                    const polyline = e.target;
+                    if (polyline && polyline._tooltip && e.latlng) {
+                      polyline._tooltip.setLatLng(e.latlng);
+                    }
+                  }
+                }}
+              >
+                {tooltipContent && (
+                  <Tooltip 
+                    permanent={false} 
+                    direction="auto"
+                    options={{ sticky: true }}
+                  >
+                    {tooltipContent}
+                  </Tooltip>
+                )}
+              </Polyline>
             );
           })
         ) : (

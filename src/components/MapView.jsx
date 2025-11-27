@@ -142,15 +142,34 @@ export default function MapView({ waypoints = [], routePolyline = [], segments =
             // Format distance for tooltip
             const distanceText = formatDistance(segment.distance);
             const tooltipContent = distanceText || (segment.distance != null ? 'Distance not available' : null);
+            const segmentColor = segmentColors[index % segmentColors.length];
             
             return (
               <Polyline
                 key={`segment-${index}-${segment.fromWaypointId}-${segment.toWaypointId}`}
                 positions={validPolyline}
-                color={segmentColors[index % segmentColors.length]}
+                color={segmentColor}
                 weight={4}
                 opacity={0.7}
                 eventHandlers={{
+                  mouseover: (e) => {
+                    // Highlight segment on hover: increase weight and opacity
+                    const polyline = e.target;
+                    polyline.setStyle({
+                      weight: 6,
+                      opacity: 1.0
+                    });
+                    // Bring to front
+                    polyline.bringToFront();
+                  },
+                  mouseout: (e) => {
+                    // Restore original style
+                    const polyline = e.target;
+                    polyline.setStyle({
+                      weight: 4,
+                      opacity: 0.7
+                    });
+                  },
                   mousemove: (e) => {
                     // Update tooltip position to follow mouse
                     const polyline = e.target;

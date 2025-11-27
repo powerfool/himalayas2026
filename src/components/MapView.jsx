@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
-import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
+import { useEffect, useRef } from 'react';
+import { MapContainer, TileLayer, Polyline, Marker, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { formatDistance } from '../utils/geoUtils';
 
 // Fix for default marker icons in React-Leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -10,6 +11,45 @@ L.Icon.Default.mergeOptions({
   iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
 });
+
+/**
+ * Component for polyline segment with tooltip that follows mouse cursor
+ */
+function SegmentWithTooltip({ positions, color, tooltipText }) {
+  const polylineRef = useRef(null);
+
+  useEffect(() => {
+    if (!polylineRef.current || !tooltipText) return;
+
+    const polyline = polylineRef.current.leafletElement;
+    
+    // Create tooltip that follows mouse using Leaflet's sticky option
+    const tooltip = L.tooltip({
+      permanent: false,
+      direction: 'auto',
+      sticky: true, // Makes tooltip follow mouse cursor
+      interactive: false
+    });
+    tooltip.setContent(tooltipText);
+    polyline.bindTooltip(tooltip);
+
+    return () => {
+      if (polyline && tooltip) {
+        polyline.unbindTooltip();
+      }
+    };
+  }, [positions, color, tooltipText]);
+
+  return (
+    <Polyline
+      ref={polylineRef}
+      positions={positions}
+      color={color}
+      weight={4}
+      opacity={0.7}
+    />
+  );
+}
 
 /**
  * Component to fit map bounds to waypoints and route segments
@@ -138,13 +178,15 @@ export default function MapView({ waypoints = [], routePolyline = [], segments =
               return null;
             }
             
+            // Format distance for tooltip
+            const distanceText = formatDistance(segment.distance);
+            
             return (
-              <Polyline
+              <SegmentWithTooltip
                 key={`segment-${index}-${segment.fromWaypointId}-${segment.toWaypointId}`}
                 positions={validPolyline}
                 color={segmentColors[index % segmentColors.length]}
-                weight={4}
-                opacity={0.7}
+                tooltipText={distanceText || (segment.distance != null ? 'Distance not available' : null)}
               />
             );
           })

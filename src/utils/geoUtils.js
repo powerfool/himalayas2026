@@ -83,3 +83,31 @@ function toDegrees(radians) {
   return radians * (180 / Math.PI);
 }
 
+/**
+ * Format distance in meters to user-friendly string
+ * @param {number} meters - Distance in meters
+ * @returns {string|null} Formatted distance string (e.g., "125.3 km" or "850 m") or null if invalid
+ */
+export function formatDistance(meters) {
+  // Handle invalid or missing values
+  if (meters == null || typeof meters !== 'number' || isNaN(meters) || meters < 0) {
+    return null;
+  }
+  
+  // Handle zero distance - don't show tooltip
+  if (meters === 0) {
+    return null;
+  }
+  
+  // Format as kilometers if >= 1000m
+  if (meters >= 1000) {
+    const km = meters / 1000;
+    // Format with 1 decimal place, remove trailing zeros
+    const formatted = km.toFixed(1).replace(/\.0$/, '');
+    return `${formatted} km`;
+  }
+  
+  // Format as meters if < 1000m
+  return `${Math.round(meters)} m`;
+}
+

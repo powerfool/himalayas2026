@@ -50,7 +50,8 @@ export default function WaypointEditor({ waypoints = [], onWaypointsChange, onGe
   };
 
   const handleSearch = async (query) => {
-    return await searchLocations(query, 'IN', 5);
+    // Use global search (null country code) to allow searching anywhere
+    return await searchLocations(query, null, 5);
   };
 
   const handleRemoveWaypoint = (index) => {

@@ -76,7 +76,8 @@ export default function AmbiguityResolution({
   };
 
   const handleAutocompleteSearch = async (query) => {
-    return await searchLocations(query, 'IN', 5);
+    // Use global search (null country code) to allow searching anywhere
+    return await searchLocations(query, null, 5);
   };
 
   const handleSuggestionSelect = (candidate) => {
@@ -193,7 +194,7 @@ export default function AmbiguityResolution({
             )}
             
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {candidates.length === 0 && onSearch && !isSearching && (
+              {onSearch && !isSearching && (
                 <button
                   onClick={() => {
                     setShowSearch(true);

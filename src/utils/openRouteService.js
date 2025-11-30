@@ -68,51 +68,149 @@ function getORSAPIKey() {
 }
 
 /**
+ * Get priority score for a location type/class
+ * Higher score = higher priority (cities/towns before specific POIs)
+ */
+function getLocationPriority(type, classType) {
+  // Administrative places (cities, towns, villages) get highest priority
+  if (classType === 'place' || classType === 'boundary') {
+    if (type === 'city' || type === 'town' || type === 'administrative') return 1000;
+    if (type === 'village' || type === 'hamlet') return 800;
+    if (type === 'suburb' || type === 'neighbourhood') return 600;
+    return 500;
+  }
+  
+  // Regions and states
+  if (classType === 'boundary' && (type === 'administrative' || type === 'state')) return 900;
+  
+  // Lower priority for specific POIs
+  if (classType === 'amenity' || classType === 'tourism' || classType === 'shop') return 100;
+  if (classType === 'highway' || classType === 'railway') return 50;
+  
+  // Default priority based on importance
+  return 200;
+}
+
+/**
+ * Check if location name already contains country information
+ * Returns true if country info is detected, false otherwise
+ */
+function hasCountryInfo(locationName) {
+  if (!locationName) return false;
+  
+  const lowerName = locationName.toLowerCase();
+  
+  // Common country names and variations (expanded list)
+  const countryNames = [
+    'afghanistan', 'bangladesh', 'bhutan', 'china', 'chinese', 'india', 'indian',
+    'kazakhstan', 'kyrgyzstan', 'kyrgyz', 'mongolia', 'mongolian', 'nepal', 'nepalese',
+    'pakistan', 'pakistani', 'tajikistan', 'turkmenistan', 'uzbekistan',
+    'tibet', 'tibetan', 'ladakh', 'kashmir', 'sikkim', 'arunachal pradesh',
+    'himalayas', 'himalayan', 'russia', 'russian', 'turkey', 'turkish',
+    'iran', 'iraq', 'saudi arabia', 'uae', 'united arab emirates',
+    'kazakh', 'tajik', 'uzbek', 'turkmen'
+  ];
+  
+  // Check if any country name appears in the location name
+  return countryNames.some(country => lowerName.includes(country));
+}
+
+/**
+ * Build search query - only append country code if location doesn't already have country info
+ * @param {string} locationName - The location name to search for
+ * @param {string|null} countryCode - Optional country code (null = global search)
+ * @returns {string} The search query to use
+ */
+function buildSearchQuery(locationName, countryCode) {
+  const trimmedName = locationName.trim();
+  
+  // If location name already contains country information, use it as-is (global search)
+  if (hasCountryInfo(trimmedName)) {
+    return trimmedName;
+  }
+  
+  // If no country code provided, search globally
+  if (!countryCode) {
+    return trimmedName;
+  }
+  
+  // Otherwise, append the country code to narrow search
+  return `${trimmedName}, ${countryCode}`;
+}
+
+/**
  * Search for locations using Nominatim (OpenStreetMap) - optimized for autocomplete
- * Returns suggestions as user types, sorted by importance
+ * Returns suggestions as user types, sorted by priority (cities/towns first)
  * @param {string} query - Partial search query (what user is typing)
- * @param {string} countryCode - Optional country code (e.g., 'IN' for India)
+ * @param {string|null} countryCode - Optional country code (e.g., 'IN' for India, null for global search)
  * @param {number} limit - Maximum number of suggestions to return (default: 5)
+ * @param {number} timeoutMs - Request timeout in milliseconds (default: 15000)
  * @returns {Promise<{candidates: Array<{lat: number, lng: number, display_name: string, importance: number, type: string, class: string}>}>}
  */
-export async function searchLocations(query, countryCode = 'IN', limit = 5) {
+export async function searchLocations(query, countryCode = null, limit = 5, timeoutMs = 15000) {
   if (!query || query.trim().length < 2) {
     return { candidates: [] };
   }
 
   try {
-    const searchQuery = query.trim();
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery + (countryCode ? ', ' + countryCode : ''))}&limit=${limit}&dedupe=1`;
+    const searchQuery = buildSearchQuery(query, countryCode);
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=${limit * 2}&dedupe=1`;
     
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'HimalayasRouteVisualizer/1.0'
+    // Create abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'HimalayasRouteVisualizer/1.0'
+        },
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`Search failed: ${response.statusText}`);
       }
-    });
 
-    if (!response.ok) {
-      throw new Error(`Search failed: ${response.statusText}`);
+      const data = await response.json();
+      
+      if (!data || data.length === 0) {
+        return { candidates: [] };
+      }
+
+      // Map and prioritize candidates
+      const candidates = data
+        .map(result => ({
+          lat: parseFloat(result.lat),
+          lng: parseFloat(result.lon),
+          display_name: result.display_name,
+          importance: result.importance || 0,
+          type: result.type || '',
+          class: result.class || '',
+          priority: getLocationPriority(result.type || '', result.class || '')
+        }))
+        // Sort by priority first (higher priority first), then by importance
+        .sort((a, b) => {
+          if (b.priority !== a.priority) {
+            return b.priority - a.priority;
+          }
+          return (b.importance || 0) - (a.importance || 0);
+        })
+        // Take top results after sorting
+        .slice(0, limit)
+        // Remove priority from final result
+        .map(({ priority, ...rest }) => rest);
+
+      return { candidates };
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      if (fetchError.name === 'AbortError') {
+        throw new Error(`Search timed out after ${timeoutMs}ms. Please try again.`);
+      }
+      throw fetchError;
     }
-
-    const data = await response.json();
-    
-    if (!data || data.length === 0) {
-      return { candidates: [] };
-    }
-
-    // Return candidates sorted by importance (higher importance first)
-    const candidates = data
-      .map(result => ({
-        lat: parseFloat(result.lat),
-        lng: parseFloat(result.lon),
-        display_name: result.display_name,
-        importance: result.importance || 0,
-        type: result.type || '',
-        class: result.class || ''
-      }))
-      .sort((a, b) => (b.importance || 0) - (a.importance || 0));
-
-    return { candidates };
   } catch (error) {
     console.error('Location search error:', error);
     throw error;
@@ -121,43 +219,73 @@ export async function searchLocations(query, countryCode = 'IN', limit = 5) {
 
 /**
  * Geocode a location name to coordinates using Nominatim (OpenStreetMap)
- * Returns all candidates for ambiguity resolution
+ * Returns all candidates for ambiguity resolution, prioritized (cities/towns first)
  * @param {string} locationName - Name of the location
- * @param {string} countryCode - Optional country code (e.g., 'IN' for India)
+ * @param {string|null} countryCode - Optional country code (e.g., 'IN' for India, null for global search)
  * @param {number} limit - Maximum number of candidates to return (default: 5)
- * @returns {Promise<{candidates: Array<{lat: number, lng: number, display_name: string, importance: number}>}>}
+ * @param {number} timeoutMs - Request timeout in milliseconds (default: 15000)
+ * @returns {Promise<{candidates: Array<{lat: number, lng: number, display_name: string, importance: number, type: string, class: string}>}>}
  */
-export async function geocodeLocation(locationName, countryCode = 'IN', limit = 5) {
+export async function geocodeLocation(locationName, countryCode = null, limit = 5, timeoutMs = 15000) {
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(locationName + ', ' + countryCode)}&limit=${limit}`;
+    const searchQuery = buildSearchQuery(locationName, countryCode);
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=${limit * 2}`;
     
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'HimalayasRouteVisualizer/1.0'
+    // Create abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'HimalayasRouteVisualizer/1.0'
+        },
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`Geocoding failed: ${response.statusText}`);
       }
-    });
 
-    if (!response.ok) {
-      throw new Error(`Geocoding failed: ${response.statusText}`);
+      const data = await response.json();
+      
+      if (!data || data.length === 0) {
+        return { candidates: [] };
+      }
+
+      // Map and prioritize candidates
+      const candidates = data
+        .map(result => ({
+          lat: parseFloat(result.lat),
+          lng: parseFloat(result.lon),
+          display_name: result.display_name,
+          importance: result.importance || 0,
+          type: result.type || '',
+          class: result.class || '',
+          priority: getLocationPriority(result.type || '', result.class || '')
+        }))
+        // Sort by priority first (higher priority first), then by importance
+        .sort((a, b) => {
+          if (b.priority !== a.priority) {
+            return b.priority - a.priority;
+          }
+          return (b.importance || 0) - (a.importance || 0);
+        })
+        // Take top results after sorting
+        .slice(0, limit)
+        // Remove priority from final result
+        .map(({ priority, ...rest }) => rest);
+
+      return { candidates };
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      if (fetchError.name === 'AbortError') {
+        throw new Error(`Geocoding timed out after ${timeoutMs}ms. Please try again.`);
+      }
+      throw fetchError;
     }
-
-    const data = await response.json();
-    
-    if (!data || data.length === 0) {
-      return { candidates: [] };
-    }
-
-    // Return all candidates with their details
-    const candidates = data.map(result => ({
-      lat: parseFloat(result.lat),
-      lng: parseFloat(result.lon),
-      display_name: result.display_name,
-      importance: result.importance || 0,
-      type: result.type || '',
-      class: result.class || ''
-    }));
-
-    return { candidates };
   } catch (error) {
     console.error('Geocoding error:', error);
     throw error;
@@ -535,5 +663,6 @@ export async function geocodeMultipleLocations(locationNames) {
   
   return results;
 }
+
 
 

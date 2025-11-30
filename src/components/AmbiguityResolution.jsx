@@ -15,6 +15,7 @@ import AutocompleteInput from './AutocompleteInput';
  * @param {Function} props.onSearch - Callback to search with a different name: (newName) => Promise<void>
  * @param {boolean} props.isSearching - Whether a search is currently in progress
  * @param {string} props.searchError - Error message if search failed
+ * @param {boolean} props.startInSearchMode - If true, start with search interface open (for editing)
  */
 export default function AmbiguityResolution({
   waypointName,
@@ -24,11 +25,12 @@ export default function AmbiguityResolution({
   onCancel,
   onSearch,
   isSearching = false,
-  searchError = null
+  searchError = null,
+  startInSearchMode = false
 }) {
   const [manualCoords, setManualCoords] = useState({ lat: '', lng: '' });
   const [showManualEntry, setShowManualEntry] = useState(false);
-  const [showSearch, setShowSearch] = useState(false);
+  const [showSearch, setShowSearch] = useState(startInSearchMode);
   const [searchName, setSearchName] = useState('');
   
   // Reset search view when candidates change (new search completed)
@@ -111,9 +113,11 @@ export default function AmbiguityResolution({
         boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
       }}>
         <h3 style={{ marginTop: 0, marginBottom: '16px' }}>
-          {candidates.length > 0 
-            ? `Multiple locations found for "${waypointName}"`
-            : `No locations found for "${waypointName}"`}
+          {startInSearchMode && candidates.length === 0
+            ? `Edit waypoint: "${waypointName}"`
+            : candidates.length > 0 
+              ? `Multiple locations found for "${waypointName}"`
+              : `No locations found for "${waypointName}"`}
         </h3>
         
         {isSearching && (
@@ -349,9 +353,13 @@ export default function AmbiguityResolution({
           </div>
         ) : (
           <div>
-            <h4 style={{ marginTop: 0, marginBottom: '12px' }}>Search with Different Name</h4>
+            <h4 style={{ marginTop: 0, marginBottom: '12px' }}>
+              {startInSearchMode ? 'Search for a new location' : 'Search with Different Name'}
+            </h4>
             <p style={{ marginBottom: '16px', color: '#6b7280', fontSize: '14px' }}>
-              Original name: "{waypointName}". Enter an alternative name to search:
+              {startInSearchMode 
+                ? `Current waypoint: "${waypointName}". Enter a new location name to search:`
+                : `Original name: "${waypointName}". Enter an alternative name to search:`}
             </p>
             
             {searchError && (

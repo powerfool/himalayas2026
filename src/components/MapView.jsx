@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -66,6 +66,9 @@ export default function MapView({ waypoints = [], routePolyline = [], segments =
   const defaultCenter = [32.2432, 77.1892];
   const defaultZoom = 7;
   
+  // Map view state: 'map' or 'satellite'
+  const [mapView, setMapView] = useState('map');
+  
   // Debug logging
   useEffect(() => {
   }, [segments, routePolyline]);
@@ -106,17 +109,71 @@ export default function MapView({ waypoints = [], routePolyline = [], segments =
   };
 
   return (
-    <div style={{ height: '100%', width: '100%' }}>
+    <div style={{ height: '100%', width: '100%', position: 'relative' }}>
+      {/* Map view toggle button */}
+      <div style={{
+        position: 'absolute',
+        top: '10px',
+        right: '10px',
+        zIndex: 1000,
+        backgroundColor: 'white',
+        borderRadius: '4px',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+        display: 'flex',
+        overflow: 'hidden'
+      }}>
+        <button
+          onClick={() => setMapView('map')}
+          style={{
+            padding: '8px 12px',
+            border: 'none',
+            backgroundColor: mapView === 'map' ? '#3b82f6' : 'white',
+            color: mapView === 'map' ? 'white' : '#374151',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: mapView === 'map' ? '600' : '400',
+            transition: 'all 0.2s'
+          }}
+          title="Map view"
+        >
+          Map
+        </button>
+        <button
+          onClick={() => setMapView('satellite')}
+          style={{
+            padding: '8px 12px',
+            border: 'none',
+            borderLeft: '1px solid #e5e7eb',
+            backgroundColor: mapView === 'satellite' ? '#3b82f6' : 'white',
+            color: mapView === 'satellite' ? 'white' : '#374151',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: mapView === 'satellite' ? '600' : '400',
+            transition: 'all 0.2s'
+          }}
+          title="Satellite view"
+        >
+          Satellite
+        </button>
+      </div>
+
       <MapContainer
         center={defaultCenter}
         zoom={defaultZoom}
         style={{ height: '100%', width: '100%' }}
         scrollWheelZoom={true}
       >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+        {mapView === 'map' ? (
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+        ) : (
+          <TileLayer
+            attribution='&copy; <a href="https://www.esri.com/">Esri</a> &mdash; Source: Esri, Maxar, GeoEye, Earthstar Geographics, CNES/Airbus DS, USDA, USGS, AeroGRID, IGN, and the GIS User Community'
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+          />
+        )}
         
         <FitBounds waypoints={waypoints} segments={segments} routePolyline={routePolyline} />
         

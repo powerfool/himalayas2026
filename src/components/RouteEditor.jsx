@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { getRoute, saveRoute } from '../utils/storage';
 import { extractWaypointsWithRetry } from '../utils/anthropicService';
-import { geocodeLocation, calculateRouteSegments, DEFAULT_ROUTING_PROFILE } from '../utils/openRouteService';
+import { geocodeLocation, calculateRouteSegments, calculateRoute, DEFAULT_ROUTING_PROFILE } from '../utils/openRouteService';
 import RouteForm from './RouteForm';
 import WaypointEditor from './WaypointEditor';
 import MapView from './MapView';
@@ -21,7 +21,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
   const [error, setError] = useState(null);
   const [isNewRoute, setIsNewRoute] = useState(!routeId);
   const [geocodingProgress, setGeocodingProgress] = useState({ current: 0, total: 0, message: null });
-  const [ambiguityState, setAmbiguityState] = useState(null); // { waypointIndex, waypointName, candidates }
+  const [ambiguityState, setAmbiguityState] = useState(null); // { waypointIndex, waypointName, candidates, isEditing }
   const [searchError, setSearchError] = useState(null); // Error message from search
 
   // Load route data when routeId changes
@@ -226,19 +226,53 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
     setGeocodingProgress({ current: 0, total: 0, message: null });
   };
 
+  const handleEditWaypoint = (waypointIndex) => {
+    const waypoint = waypoints[waypointIndex];
+    if (!waypoint) return;
+
+    // When editing, start with search interface open (not candidates list)
+    // This allows user to search for a completely different location
+    setAmbiguityState({
+      waypointIndex,
+      waypointName: waypoint.name,
+      candidates: [],
+      isEditing: true,
+      startInSearchMode: true
+    });
+  };
+
   const handleAmbiguityResolve = async (selectedCandidate) => {
     if (!ambiguityState) return;
     
+    const wasEditing = ambiguityState.isEditing;
+    const oldWaypoint = waypoints[ambiguityState.waypointIndex];
+    const hadCoordinates = oldWaypoint && oldWaypoint.lat !== 0 && oldWaypoint.lng !== 0;
+    
     const updatedWaypoints = [...waypoints];
+    const currentWaypoint = updatedWaypoints[ambiguityState.waypointIndex];
+    
+    // If display_name starts with "Manual:", keep the original name
+    // Otherwise, update name if display_name is different
+    const shouldUpdateName = selectedCandidate.display_name && 
+                             !selectedCandidate.display_name.startsWith('Manual:') &&
+                             selectedCandidate.display_name !== currentWaypoint.name;
+    
     updatedWaypoints[ambiguityState.waypointIndex] = {
-      ...updatedWaypoints[ambiguityState.waypointIndex],
+      ...currentWaypoint,
       lat: selectedCandidate.lat,
       lng: selectedCandidate.lng,
-      display_name: selectedCandidate.display_name
+      display_name: selectedCandidate.display_name,
+      name: shouldUpdateName ? selectedCandidate.display_name : currentWaypoint.name
     };
     
     setWaypoints(updatedWaypoints);
     setAmbiguityState(null);
+    
+    // If editing and waypoint had coordinates, recalculate affected segments
+    if (wasEditing && hadCoordinates && segments.length > 0) {
+      await handleRecalculateAffectedSegments(ambiguityState.waypointIndex);
+      return;
+    }
     
     // Continue geocoding remaining waypoints using updated list
     const remaining = updatedWaypoints.filter(wp => wp.lat === 0 && wp.lng === 0);
@@ -342,6 +376,10 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
   const handleAmbiguitySearch = async (newName) => {
     if (!ambiguityState || !newName.trim()) return;
     
+    const isEditing = ambiguityState.isEditing || false;
+    const oldWaypoint = waypoints[ambiguityState.waypointIndex];
+    const hadCoordinates = oldWaypoint && oldWaypoint.lat !== 0 && oldWaypoint.lng !== 0;
+    
     setLoading(true);
     setSearchError(null);
     
@@ -365,7 +403,8 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
         setAmbiguityState({
           waypointIndex: ambiguityState.waypointIndex,
           waypointName: newName.trim(),
-          candidates: []
+          candidates: [],
+          isEditing: isEditing // Preserve edit flag
         });
         setLoading(false);
         setSearchError(null);
@@ -385,9 +424,15 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
         setAmbiguityState(null);
         setSearchError(null);
         
-        // Continue geocoding remaining waypoints using updated list
+        // If editing and waypoint had coordinates, recalculate affected segments
+        if (isEditing && hadCoordinates && segments.length > 0) {
+          await handleRecalculateAffectedSegments(ambiguityState.waypointIndex);
+          return;
+        }
+        
+        // Continue geocoding remaining waypoints using updated list (only if not editing)
         const remaining = updatedWaypoints.filter(wp => wp.lat === 0 && wp.lng === 0);
-        if (remaining.length > 0) {
+        if (remaining.length > 0 && !isEditing) {
           // Continue geocoding from the updated waypoints list
           setLoading(true);
           setError(null);
@@ -456,7 +501,8 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
         setAmbiguityState({
           waypointIndex: ambiguityState.waypointIndex,
           waypointName: newName.trim(),
-          candidates: result.candidates
+          candidates: result.candidates,
+          isEditing: isEditing // Preserve edit flag
         });
         setLoading(false);
         setSearchError(null);
@@ -468,9 +514,122 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
       setAmbiguityState({
         waypointIndex: ambiguityState.waypointIndex,
         waypointName: newName.trim(),
-        candidates: []
+        candidates: [],
+        isEditing: isEditing // Preserve edit flag
       });
       setLoading(false);
+    }
+  };
+
+  /**
+   * Recalculate only the segments affected by a waypoint change
+   * @param {number} changedWaypointIndex - Index of the waypoint that was changed
+   */
+  const handleRecalculateAffectedSegments = async (changedWaypointIndex) => {
+    const geocodedWaypoints = waypoints.filter(wp => wp.lat !== 0 && wp.lng !== 0);
+    
+    if (geocodedWaypoints.length < 2) {
+      setError('At least 2 geocoded waypoints are required');
+      return;
+    }
+
+    // Find the index of the changed waypoint in the geocoded waypoints array
+    const geocodedIndex = geocodedWaypoints.findIndex((wp, idx) => {
+      const originalWp = waypoints.find(w => w.id === wp.id || (w.order === wp.order && w.name === wp.name));
+      return originalWp && waypoints.indexOf(originalWp) === changedWaypointIndex;
+    });
+
+    if (geocodedIndex === -1) {
+      // Waypoint not found in geocoded list, recalculate all
+      return handleCalculateRoute();
+    }
+
+    // Determine which segments are affected
+    // If waypoint at index i changes, segments i-1 and i are affected
+    const affectedSegmentStart = Math.max(0, geocodedIndex - 1);
+    const affectedSegmentEnd = Math.min(geocodedWaypoints.length - 2, geocodedIndex);
+    const affectedSegmentCount = affectedSegmentEnd - affectedSegmentStart + 1;
+
+    if (affectedSegmentCount <= 0) {
+      return; // No segments to recalculate
+    }
+
+    setLoading(true);
+    setError(null);
+    setGeocodingProgress({ 
+      current: 0, 
+      total: affectedSegmentCount, 
+      message: `Recalculating ${affectedSegmentCount} affected segment(s)...` 
+    });
+
+    try {
+      const updatedSegments = [...segments];
+      let recalculatedCount = 0;
+
+      // Recalculate each affected segment
+      for (let i = affectedSegmentStart; i <= affectedSegmentEnd; i++) {
+        const from = geocodedWaypoints[i];
+        const to = geocodedWaypoints[i + 1];
+        
+        setGeocodingProgress({ 
+          current: recalculatedCount + 1, 
+          total: affectedSegmentCount,
+          message: `Recalculating segment ${i + 1} → ${i + 2}...`
+        });
+
+        try {
+          const segmentData = await calculateRoute(from, to, DEFAULT_ROUTING_PROFILE);
+          
+          // Find the segment in the existing segments array
+          const fromId = from.id || (from.order !== undefined ? from.order.toString() : i.toString());
+          const toId = to.id || (to.order !== undefined ? to.order.toString() : (i + 1).toString());
+          
+          const segmentIndex = updatedSegments.findIndex(s => 
+            s.fromWaypointId === fromId && s.toWaypointId === toId
+          );
+
+          const newSegment = {
+            fromWaypointId: fromId,
+            toWaypointId: toId,
+            polyline: segmentData.polyline,
+            distance: segmentData.distance,
+            duration: segmentData.duration
+          };
+
+          if (segmentIndex >= 0) {
+            // Update existing segment
+            updatedSegments[segmentIndex] = newSegment;
+          } else {
+            // Insert new segment at the correct position
+            updatedSegments.splice(i, 0, newSegment);
+          }
+
+          recalculatedCount++;
+        } catch (err) {
+          console.error(`Error recalculating segment ${i} → ${i + 1}:`, err);
+          // Continue with other segments even if one fails
+        }
+      }
+
+      setSegments(updatedSegments);
+      
+      // Generate combined polyline for backward compatibility
+      const combinedPolyline = updatedSegments.flatMap(segment => segment.polyline);
+      setRoutePolyline(combinedPolyline);
+      
+      setLoading(false);
+      setGeocodingProgress({ current: 0, total: 0, message: null });
+      
+      if (recalculatedCount === affectedSegmentCount) {
+        setError(null); // Success
+      } else {
+        setError(`Warning: Only ${recalculatedCount} of ${affectedSegmentCount} segments recalculated successfully.`);
+      }
+    } catch (err) {
+      console.error('Partial route recalculation error:', err);
+      setError(`Error recalculating segments: ${err.message}`);
+      setLoading(false);
+      setGeocodingProgress({ current: 0, total: 0, message: null });
     }
   };
 
@@ -662,6 +821,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
           waypoints={waypoints}
           onWaypointsChange={setWaypoints}
           onGeocodeWaypoint={handleGeocodeSingleWaypoint}
+          onEditWaypoint={handleEditWaypoint}
           isGeocoding={loading}
         />
 
@@ -757,6 +917,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
           onSearch={handleAmbiguitySearch}
           isSearching={loading && ambiguityState.waypointIndex !== undefined}
           searchError={searchError}
+          startInSearchMode={ambiguityState.startInSearchMode || false}
         />
       )}
     </div>

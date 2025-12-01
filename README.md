@@ -2,6 +2,9 @@
 
 A local web application for planning and visualizing motorbike routes in the Indian Himalayas. Input itineraries from tour operators, extract waypoints, and visualize routes on an interactive map using OpenStreetMap.
 
+![Himalayas Route Visualizer 2025-12-01 at 8 18 07 PM](https://github.com/user-attachments/assets/d6c88ae8-a97e-4f4e-acaa-c5d2bcb67fd8)
+
+
 ## Current Status
 
 **Phases 0-9 Complete** - Full MVP with enhanced segment visualization and interaction!

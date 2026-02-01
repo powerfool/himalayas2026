@@ -526,3 +526,5 @@ MVP complete when:
 - Keep code simple and maintainable
 - Reference SPEC.md for detailed requirements
 
+**Deployment (future):** Storage is browser-only (IndexedDB). For hosting the app and moving to an online database so routes are available across devices, see the Deployment section in README.md.
+

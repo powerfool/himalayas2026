@@ -185,7 +185,9 @@ A local web application for visualizing motorbike routes in the Indian Himalayas
 
 ## Storage
 
-### IndexedDB Schema
+### IndexedDB (Current Implementation)
+
+Routes are stored **in the browser only** via IndexedDB. There is no database file in the project folder. Data is tied to the browser and origin (e.g. `localhost:5173` or deployed URL); a different browser or device will not see the same routes.
 
 **Routes Store:**
 - Key: `id` (UUID)
@@ -193,9 +195,9 @@ A local web application for visualizing motorbike routes in the Indian Himalayas
 - Indexes: `name`, `createdAt`, `updatedAt`
 
 **Migration Path:**
-- Current localStorage implementation can be migrated
-- Export/import JSON functionality for backup
-- Structure data models to easily swap to backend API later
+- Current localStorage implementation can be migrated to IndexedDB on first load (implemented)
+- Export/import JSON functionality for backup (future)
+- Structure data models to easily swap to backend API later; deployment and online DB options (e.g. Supabase, Cloudflare D1) are documented in README.md
 
 ## Error Handling
 

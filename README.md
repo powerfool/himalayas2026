@@ -31,6 +31,8 @@ A local web application for planning and visualizing motorbike routes in the Ind
 - **Trip calendar** - Map | Calendar tabs; in Calendar tab: assign each segment to a day (with cascade), set trip start date, see duration; list and grid views; gap/rest days supported; first segment can be Day 2+ so Day 1 can be a rest day; segment labels use short place names (e.g. Leh → Lamayuru)
 - **Day notes** - Add notes per trip day in the calendar; popover editor, truncated preview on cards, persisted with the route
 - **Coordinates preserved from autocomplete** - Selecting a location from autocomplete automatically includes coordinates (no geocoding needed)
+- **Auto-save** - Changes to waypoints, segments, calendar (trip days, start date), route name, and itinerary are saved automatically after you stop editing (1.5s debounce); status indicator (Saving… / Saved / Error) in the top-right corner
+- **Export/Import** - Export all routes to JSON file for backup; import routes with smart conflict handling (merge by timestamp, import only new, or replace all); automatic backup created before each import
 - IndexedDB persistent storage (with automatic localStorage migration)
 
 **Try it:** `npm run dev` → Create new route → Paste itinerary → Click "Extract Waypoints" → Geocode waypoints → Calculate Route → Open the **Calendar** tab to assign segments to days and set trip start date → Switch between List and Calendar views → Toggle Map tab for route editing and Save → Hover over segments on the map to see distances.
@@ -53,6 +55,7 @@ VITE_ORS_API_KEY=your_ors_key_here
 
 ### Route Management
 - **Create, Edit, and Save Routes**: Manage multiple routes with persistent storage
+- **Auto-save**: Changes to route name, itinerary, waypoints, segments, trip days, and start date are saved automatically (debounced); a status indicator in the top-right shows "Saving…", "Saved", or "Error saving". Manual "Save Route" still saves and returns you to the library.
 - **Route Library**: View and manage all your saved routes
 - **Itinerary Parsing**: Automatically extract location names from pasted itinerary text using Anthropic Claude LLM
 
@@ -93,6 +96,17 @@ VITE_ORS_API_KEY=your_ors_key_here
 ### User Experience
 - **Progress Tracking**: Visual progress indicators during waypoint extraction, geocoding, and route calculation
 - **Always-Visible Search**: Search button always available in ambiguity resolution modal, even when candidates are shown
+
+### Export/Import
+- **Export All Routes**: Download all routes to a JSON file (`himalayas-routes-YYYY-MM-DD.json`) for backup or transfer between devices
+- **Smart Import with Conflict Handling**:
+  - **No conflicts detected** → Routes imported directly without dialog
+  - **Conflicts detected** (matching route IDs) → Choose import mode:
+    - **Merge (keep newer)**: Compare timestamps, keep the most recent version of each route
+    - **Import only new**: Only add routes that don't exist locally (skip existing IDs)
+    - **Replace all**: Clear all local routes and import everything (fresh start)
+- **Automatic Backup**: Before any import, a timestamped backup file is created automatically
+- **Import Summary**: Shows how many routes were added, updated, or skipped
 
 ## Getting Started
 
@@ -139,9 +153,26 @@ npm run dev
    - Only affected route segments will be recalculated when you recalculate the route
 7. **Calculate Route**: Click "Calculate Route" - system automatically handles unreachable waypoints by finding closest routable coordinates
 8. **Trip calendar**: Open the **Calendar** tab. Set "Trip start (Day 1)" and assign each segment to a day (first segment can be Day 2+ for a rest day on Day 1; changing a segment’s day cascades to later segments). Use List or Calendar view; add day notes if needed.
-9. **View routes**: On the **Map** tab, toggle map/satellite, hover over segments to see distances, click waypoints for details. **Save Route** is only shown on the Map tab; click it to persist your work (trip days and notes are included and auto-saved with other changes).
+9. **View routes**: On the **Map** tab, toggle map/satellite, hover over segments to see distances, click waypoints for details. Edits (waypoints, segments, calendar, name, itinerary) are **auto-saved**; the top-right indicator shows when saving. Click **Save Route** when you are done to persist and return to the library.
 
 You can edit existing routes by clicking on them in the library view. When you edit a waypoint in an existing route and recalculate, only the affected segments are recalculated, making route refinement much faster.
+
+### Export/Import Routes
+
+**To export routes:**
+- Click "Export All" in the library header
+- Downloads `himalayas-routes-YYYY-MM-DD.json` with all your routes
+- Use for backup or transfer between devices/browsers
+
+**To import routes:**
+- Click "Import" in the library header → select JSON file
+- **If no conflicts** → Routes imported directly
+- **If conflicts exist** (matching route IDs) → Choose import mode:
+  - **Merge (keep newer)** - Default; keeps most recent version
+  - **Import only new** - Only adds routes you don't have
+  - **Replace all** - Clears everything and imports from file
+- A backup file is created automatically before import
+- Import summary shows what was added/updated/skipped
 
 ## Technology Stack
 
@@ -154,6 +185,8 @@ You can edit existing routes by clicking on them in the library view. When you e
 ## Data Storage
 
 Routes are stored locally in your browser's IndexedDB. All data persists between sessions. If you have existing routes in localStorage, they will be automatically migrated to IndexedDB on first load.
+
+**Moving routes between devices/browsers:** Use the Export/Import feature (see above) to download routes as JSON and import them on another device.
 
 ## Future Enhancements
 

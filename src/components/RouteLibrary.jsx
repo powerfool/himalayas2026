@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { getAllRoutes, deleteRoute, saveRoute } from '../utils/storage';
+import { getDB } from '../utils/indexedDB';
 
 /**
  * RouteLibrary component - Main view showing list of saved routes
@@ -92,6 +93,13 @@ export default function RouteLibrary({ onSelectRoute, onNewRoute }) {
     fileInputRef.current?.click();
   };
 
+  // Save route directly to IndexedDB without modifying timestamps
+  // Used during import to preserve original createdAt/updatedAt
+  const saveRoutePreservingTimestamps = async (route) => {
+    const db = await getDB();
+    await db.put('routes', route);
+  };
+
   const handleFileSelected = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -146,8 +154,9 @@ export default function RouteLibrary({ onSelectRoute, onNewRoute }) {
       }
 
       // Import all routes (no conflicts, so just add them all)
+      // Use timestamp-preserving save to keep original createdAt/updatedAt
       for (const route of importedRoutes) {
-        await saveRoute(route);
+        await saveRoutePreservingTimestamps(route);
       }
 
       // Reload routes
@@ -252,16 +261,18 @@ export default function RouteLibrary({ onSelectRoute, onNewRoute }) {
         for (const existingRoute of currentRoutes) {
           await deleteRoute(existingRoute.id);
         }
+        // Use timestamp-preserving save to keep original createdAt/updatedAt
         for (const route of importedRoutes) {
-          await saveRoute(route);
+          await saveRoutePreservingTimestamps(route);
           added++;
         }
       } else if (importMode === 'new-only') {
         // Import only new: skip routes that already exist
         const existingIds = new Set(currentRoutes.map(r => r.id));
+        // Use timestamp-preserving save to keep original createdAt/updatedAt
         for (const route of importedRoutes) {
           if (!existingIds.has(route.id)) {
-            await saveRoute(route);
+            await saveRoutePreservingTimestamps(route);
             added++;
           } else {
             skipped++;
@@ -271,12 +282,13 @@ export default function RouteLibrary({ onSelectRoute, onNewRoute }) {
         // Merge (keep newer): compare timestamps
         const existingRoutesMap = new Map(currentRoutes.map(r => [r.id, r]));
         
+        // Use timestamp-preserving save to keep original createdAt/updatedAt
         for (const importedRoute of importedRoutes) {
           const existing = existingRoutesMap.get(importedRoute.id);
           
           if (!existing) {
             // New route
-            await saveRoute(importedRoute);
+            await saveRoutePreservingTimestamps(importedRoute);
             added++;
           } else {
             // Compare timestamps
@@ -285,7 +297,7 @@ export default function RouteLibrary({ onSelectRoute, onNewRoute }) {
             
             if (importedTime > existingTime) {
               // Imported is newer
-              await saveRoute(importedRoute);
+              await saveRoutePreservingTimestamps(importedRoute);
               updated++;
             } else {
               // Existing is newer or same

@@ -28,12 +28,12 @@ A local web application for planning and visualizing motorbike routes in the Ind
 - **Google Maps links** - Quick access to Google Maps for each waypoint to get more context
 - **Segment length hover tooltips** - Hover over any segment to see its distance (e.g., "125.3 km" or "850 m"); segments store distance only (no duration)
 - **Interactive segment highlighting** - Segments become thicker and more prominent when hovered
-- **Trip calendar** - List and calendar views of trip days; assign segments to days and set a trip start date
+- **Trip calendar** - Map | Calendar tabs; in Calendar tab: assign each segment to a day (with cascade), set trip start date, see duration; list and grid views; gap/rest days supported; first segment can be Day 2+ so Day 1 can be a rest day; segment labels use short place names (e.g. Leh → Lamayuru)
 - **Day notes** - Add notes per trip day in the calendar; popover editor, truncated preview on cards, persisted with the route
 - **Coordinates preserved from autocomplete** - Selecting a location from autocomplete automatically includes coordinates (no geocoding needed)
 - IndexedDB persistent storage (with automatic localStorage migration)
 
-**Try it:** `npm run dev` → Create new route → Paste itinerary → Click "Extract Waypoints" → Type location names with autocomplete suggestions → Click "Geocode Waypoints" (or geocode individual waypoints) → Calculate Route → Assign trip days and set start date → Open Calendar tab to see days and add notes per day → Toggle between map and satellite views → Hover over colored segments to see distances!
+**Try it:** `npm run dev` → Create new route → Paste itinerary → Click "Extract Waypoints" → Geocode waypoints → Calculate Route → Open the **Calendar** tab to assign segments to days and set trip start date → Switch between List and Calendar views → Toggle Map tab for route editing and Save → Hover over segments on the map to see distances.
 
 ## Setup
 
@@ -80,9 +80,10 @@ VITE_ORS_API_KEY=your_ors_key_here
 - **Interactive Segment Highlighting**: Segments become thicker and more prominent when hovered for better visibility
 
 ### Trip Calendar & Day Notes
-- **Trip days**: Assign each route segment to a day; set trip start date (Day 1)
-- **Calendar views**: List view (vertical day cards) and Calendar view (grid); buffer days before/after trip when start date is set
-- **Day notes**: Add notes per trip day (keyed by day number); "Add note" or note preview on each day card opens a popover to edit; notes persisted with the route and auto-saved
+- **Map | Calendar tabs**: Map tab shows route editor (name, itinerary, waypoints, Geocode/Calculate, Save). Calendar tab shows only Trip days (start date, segment-day assignment, duration) and the calendar; no route settings or Save in calendar view.
+- **Trip days**: Assign each segment to a day (min = previous segment’s day; first segment can be Day 1 or later so Day 1 can be a rest day). New routes get sequential days (1, 2, 3…). Changing a segment’s day cascades to later segments. Duration shown as Day 1 – Day N.
+- **Calendar views**: List view (vertical day cards) and Calendar view (grid); buffer days before/after trip when start date is set; segments shown as short place names (e.g. Leh → Lamayuru).
+- **Day notes**: Add notes per trip day (keyed by day number); "Add note" or note preview on each day card opens a popover to edit; notes persisted with the route and auto-saved.
 
 ### Map Visualization
 - **Interactive Map**: Visualize routes on OpenStreetMap with waypoint markers and route polylines
@@ -137,12 +138,8 @@ npm run dev
    - Select from search results or enter coordinates manually
    - Only affected route segments will be recalculated when you recalculate the route
 7. **Calculate Route**: Click "Calculate Route" - system automatically handles unreachable waypoints by finding closest routable coordinates
-8. **Assign trip days** (optional): In the left panel, set "Trip start (Day 1)" and assign each segment to a day
-9. **View routes and calendar**: 
-   - Use the Map / Calendar tab to switch between map and day list/calendar
-   - In Calendar: list or grid of days; click "Add note" on any day to add a note (saved with the route)
-   - On the map: toggle map/satellite, hover over segments to see distances, click waypoints for details, use Google Maps links for context
-10. **Save Route**: Click "Save Route" to persist your work (day notes and trip days are auto-saved with other changes)
+8. **Trip calendar**: Open the **Calendar** tab. Set "Trip start (Day 1)" and assign each segment to a day (first segment can be Day 2+ for a rest day on Day 1; changing a segment’s day cascades to later segments). Use List or Calendar view; add day notes if needed.
+9. **View routes**: On the **Map** tab, toggle map/satellite, hover over segments to see distances, click waypoints for details. **Save Route** is only shown on the Map tab; click it to persist your work (trip days and notes are included and auto-saved with other changes).
 
 You can edit existing routes by clicking on them in the library view. When you edit a waypoint in an existing route and recalculate, only the affected segments are recalculated, making route refinement much faster.
 

@@ -149,13 +149,22 @@ You can edit existing routes by clicking on them in the library view. When you e
 
 ## Data Storage
 
-Routes are stored locally in your browser's IndexedDB. All data persists between sessions. If you have existing routes in localStorage, they will be automatically migrated to IndexedDB on first load.
+Routes are stored **in your browser only** using IndexedDB (no file in the project folder). All data persists between sessions in that browser. If you have existing routes in localStorage, they will be automatically migrated to IndexedDB on first load.
+
+**Important:** Data is tied to the browser and origin (e.g. `localhost:5173` or your deployed URL). Opening the app in a different browser or on another device will not show your saved routes. To have routes available online across devices, see Deployment below.
+
+## Deployment
+
+The app is a static Vite build. To run it on a server and have routes available online:
+
+1. **Static hosting** – Build with `npm run build`, serve the `dist/` output. Options: [Vercel](https://vercel.com), [Cloudflare Pages](https://pages.cloudflare.com), [Netlify](https://netlify.com), or a VPS with nginx. Set build-time env vars: `VITE_ANTHROPIC_API_KEY`, `VITE_ORS_API_KEY`.
+2. **Online database** – The current app uses browser IndexedDB only. To have routes available online and shared across devices, add a cloud database (e.g. [Supabase](https://supabase.com) or Cloudflare D1) and a storage layer that talks to it instead of IndexedDB. See project plan/docs for a concrete deployment and migration path.
 
 ## Future Enhancements
 
 - Multiple route comparison
 - Offline mode support
-- Cloud hosting and sync
+- Cloud hosting and online database (options documented in Deployment above)
 - More sophisticated itinerary parsing
 - Village/stop information database
 - Accommodation markers

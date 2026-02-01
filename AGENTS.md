@@ -61,6 +61,8 @@ This document provides timeless guidance on HOW to work on the Himalayas Route V
 
 ### IndexedDB (CRITICAL)
 
+**Where data lives:** Storage is **browser-only**. There is no database file in the project folder. Data is tied to the browser and origin; a different browser or device will not show the same routes. For online/shared storage, see README.md Deployment section.
+
 **Database Initialization:**
 - Use `idb` package wrapper (simpler than raw IndexedDB API)
 - Initialize on app start, not per-operation

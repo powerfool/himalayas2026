@@ -26,12 +26,14 @@ A local web application for planning and visualizing motorbike routes in the Ind
 - Map visualization with distinct colors per segment
 - Numbered waypoint markers showing sequence
 - **Google Maps links** - Quick access to Google Maps for each waypoint to get more context
-- **Segment length hover tooltips** - Hover over any segment to see its distance (e.g., "125.3 km" or "850 m")
+- **Segment length hover tooltips** - Hover over any segment to see its distance (e.g., "125.3 km" or "850 m"); segments store distance only (no duration)
 - **Interactive segment highlighting** - Segments become thicker and more prominent when hovered
+- **Trip calendar** - List and calendar views of trip days; assign segments to days and set a trip start date
+- **Day notes** - Add notes per trip day in the calendar; popover editor, truncated preview on cards, persisted with the route
 - **Coordinates preserved from autocomplete** - Selecting a location from autocomplete automatically includes coordinates (no geocoding needed)
 - IndexedDB persistent storage (with automatic localStorage migration)
 
-**Try it:** `npm run dev` → Create new route → Paste itinerary → Click "Extract Waypoints" → Type location names with autocomplete suggestions → Click "Geocode Waypoints" (or geocode individual waypoints) → Calculate Route → System automatically handles unreachable waypoints → Edit waypoints to refine locations → Toggle between map and satellite views → Hover over colored segments to see distances!
+**Try it:** `npm run dev` → Create new route → Paste itinerary → Click "Extract Waypoints" → Type location names with autocomplete suggestions → Click "Geocode Waypoints" (or geocode individual waypoints) → Calculate Route → Assign trip days and set start date → Open Calendar tab to see days and add notes per day → Toggle between map and satellite views → Hover over colored segments to see distances!
 
 ## Setup
 
@@ -73,9 +75,14 @@ VITE_ORS_API_KEY=your_ors_key_here
 - **Route Calculation**: Calculate routes between waypoints using OpenRouteService API
 - **Partial Route Recalculation**: When editing a waypoint, only affected route segments are recalculated (not the entire route) - saves time and API calls
 - **Smart Waypoint Fallback Routing**: Automatically finds closest routable coordinate when waypoint is unreachable within 350m (searches along straight line, starts 1000m from problematic waypoint)
-- **Segment Visualization**: Each route segment displayed in distinct colors for easy identification
+- **Segment Visualization**: Each route segment displayed in distinct colors for easy identification; segments store distance only (no duration)
 - **Segment Length Tooltips**: Hover over any segment line to see its distance (formatted as km or m)
 - **Interactive Segment Highlighting**: Segments become thicker and more prominent when hovered for better visibility
+
+### Trip Calendar & Day Notes
+- **Trip days**: Assign each route segment to a day; set trip start date (Day 1)
+- **Calendar views**: List view (vertical day cards) and Calendar view (grid); buffer days before/after trip when start date is set
+- **Day notes**: Add notes per trip day (keyed by day number); "Add note" or note preview on each day card opens a popover to edit; notes persisted with the route and auto-saved
 
 ### Map Visualization
 - **Interactive Map**: Visualize routes on OpenStreetMap with waypoint markers and route polylines
@@ -130,12 +137,12 @@ npm run dev
    - Select from search results or enter coordinates manually
    - Only affected route segments will be recalculated when you recalculate the route
 7. **Calculate Route**: Click "Calculate Route" - system automatically handles unreachable waypoints by finding closest routable coordinates
-8. **View Routes**: 
-   - Toggle between map and satellite views using the buttons in the top-right corner
-   - Hover over route segments to see distances
-   - Click on waypoint markers to see details
-   - Click Google Maps links under waypoints for more context
-9. **Save Route**: Click "Save Route" to persist your work
+8. **Assign trip days** (optional): In the left panel, set "Trip start (Day 1)" and assign each segment to a day
+9. **View routes and calendar**: 
+   - Use the Map / Calendar tab to switch between map and day list/calendar
+   - In Calendar: list or grid of days; click "Add note" on any day to add a note (saved with the route)
+   - On the map: toggle map/satellite, hover over segments to see distances, click waypoints for details, use Google Maps links for context
+10. **Save Route**: Click "Save Route" to persist your work (day notes and trip days are auto-saved with other changes)
 
 You can edit existing routes by clicking on them in the library view. When you edit a waypoint in an existing route and recalculate, only the affected segments are recalculated, making route refinement much faster.
 
@@ -149,22 +156,13 @@ You can edit existing routes by clicking on them in the library view. When you e
 
 ## Data Storage
 
-Routes are stored **in your browser only** using IndexedDB (no file in the project folder). All data persists between sessions in that browser. If you have existing routes in localStorage, they will be automatically migrated to IndexedDB on first load.
-
-**Important:** Data is tied to the browser and origin (e.g. `localhost:5173` or your deployed URL). Opening the app in a different browser or on another device will not show your saved routes. To have routes available online across devices, see Deployment below.
-
-## Deployment
-
-The app is a static Vite build. To run it on a server and have routes available online:
-
-1. **Static hosting** – Build with `npm run build`, serve the `dist/` output. Options: [Vercel](https://vercel.com), [Cloudflare Pages](https://pages.cloudflare.com), [Netlify](https://netlify.com), or a VPS with nginx. Set build-time env vars: `VITE_ANTHROPIC_API_KEY`, `VITE_ORS_API_KEY`.
-2. **Online database** – The current app uses browser IndexedDB only. To have routes available online and shared across devices, add a cloud database (e.g. [Supabase](https://supabase.com) or Cloudflare D1) and a storage layer that talks to it instead of IndexedDB. See project plan/docs for a concrete deployment and migration path.
+Routes are stored locally in your browser's IndexedDB. All data persists between sessions. If you have existing routes in localStorage, they will be automatically migrated to IndexedDB on first load.
 
 ## Future Enhancements
 
 - Multiple route comparison
 - Offline mode support
-- Cloud hosting and online database (options documented in Deployment above)
+- Cloud hosting and sync
 - More sophisticated itinerary parsing
 - Village/stop information database
 - Accommodation markers

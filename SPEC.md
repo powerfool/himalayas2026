@@ -37,9 +37,10 @@ A local web application for visualizing motorbike routes in the Indian Himalayas
 - Save/load routes
 
 **Data Structure:**
-- Route: `{ id, name, itineraryText, waypoints[], segments[], createdAt, updatedAt }`
+- Route: `{ id, name, itineraryText, waypoints[], segments[], segmentDays[], tripStartDate, dayNotes{}, createdAt, updatedAt }`
 - Waypoint: `{ id, name, coordinates: { lat, lng }, originalText, sequence }`
-- Segment: `{ fromWaypointId, toWaypointId, polyline, distance, duration }`
+- Segment: `{ fromWaypointId, toWaypointId, polyline, distance }` (duration not stored)
+- dayNotes: `{ [dayNumber: string]: string }` — per-trip-day notes (keyed by 1-based day number)
 
 ### Out of Scope (Parking Lot)
 
@@ -106,8 +107,7 @@ A local web application for visualizing motorbike routes in the Indian Himalayas
 
 4. **Route Calculation Phase**
    - For each consecutive waypoint pair, query OpenRouteService
-   - Store route segment with polyline coordinates
-   - Calculate segment distance/duration if available
+   - Store route segment with polyline coordinates and distance (duration not stored)
 
 5. **Visualization Phase**
    - Map renders waypoint markers
@@ -179,15 +179,13 @@ A local web application for visualizing motorbike routes in the Indian Himalayas
 - **Endpoint**: `https://api.openrouteservice.org/v2/directions/driving-car`
 - **Purpose**: Calculate route between waypoints
 - **Input**: Start/end coordinates
-- **Output**: Route polyline, distance, duration
+- **Output**: Route polyline, distance (duration not used)
 - **API Key**: Required (free tier available)
 - **Error Handling**: Handle routing failures, show straight line fallback
 
 ## Storage
 
-### IndexedDB (Current Implementation)
-
-Routes are stored **in the browser only** via IndexedDB. There is no database file in the project folder. Data is tied to the browser and origin (e.g. `localhost:5173` or deployed URL); a different browser or device will not see the same routes.
+### IndexedDB Schema
 
 **Routes Store:**
 - Key: `id` (UUID)
@@ -195,9 +193,9 @@ Routes are stored **in the browser only** via IndexedDB. There is no database fi
 - Indexes: `name`, `createdAt`, `updatedAt`
 
 **Migration Path:**
-- Current localStorage implementation can be migrated to IndexedDB on first load (implemented)
-- Export/import JSON functionality for backup (future)
-- Structure data models to easily swap to backend API later; deployment and online DB options (e.g. Supabase, Cloudflare D1) are documented in README.md
+- Current localStorage implementation can be migrated
+- Export/import JSON functionality for backup
+- Structure data models to easily swap to backend API later
 
 ## Error Handling
 
@@ -337,7 +335,7 @@ Display segment distance information when user hovers over route segment lines o
 - Format: "125.3 km" or "850 m" (no trailing zeros, 1 decimal place max)
 - Tooltip appears on hover, disappears on mouseout
 - Tooltip positioned dynamically to stay visible within map bounds
-- Optional: Show duration if available (e.g., "125.3 km (2h 15m)") - only if duration data exists
+- Duration not displayed; segments store distance only
 - Tooltip should not interfere with map interactions (panning, zooming)
 
 **Integration Points:**
@@ -358,7 +356,7 @@ Display segment distance information when user hovers over route segment lines o
 
 **Out of Scope (Parking Lot):**
 - Click interaction to show permanent segment info panel
-- Segment duration display (unless already in data structure)
+- (Segment duration removed from data structure and UI)
 - Segment elevation profile on hover
 - Segment statistics (average speed, etc.)
 - Custom tooltip styling beyond Leaflet defaults

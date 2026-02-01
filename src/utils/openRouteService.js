@@ -52,6 +52,21 @@ function decodePolyline(encoded) {
 export const DEFAULT_ROUTING_PROFILE = 'driving-car';
 
 /**
+ * Check if a waypoint is geocoded (has valid coordinates)
+ * @param {Object} waypoint - Waypoint object with lat and lng properties
+ * @returns {boolean} True if waypoint has valid coordinates
+ */
+function isWaypointGeocoded(waypoint) {
+  return waypoint && 
+         typeof waypoint.lat === 'number' && 
+         typeof waypoint.lng === 'number' &&
+         waypoint.lat !== 0 && 
+         waypoint.lng !== 0 &&
+         !isNaN(waypoint.lat) && 
+         !isNaN(waypoint.lng);
+}
+
+/**
  * Get OpenRouteService API key from environment variable
  * Get your free API key from: https://openrouteservice.org/dev/#/signup
  */
@@ -319,7 +334,7 @@ function isNoRouteError(error) {
  * @param {string} profile - Route profile (default: 'driving-car')
  *   Valid profiles: 'driving-car', 'driving-hgv', 'cycling-regular', 'cycling-road', 
  *   'cycling-mountain', 'cycling-electric', 'foot-walking', 'foot-hiking', 'wheelchair'
- * @returns {Promise<{polyline: Array<[number, number]>, distance: number, duration: number}>} Segment data
+ * @returns {Promise<{polyline: Array<[number, number]>, distance: number}>} Segment data
  * @throws {Error} If routing fails, error will have isNoRouteError flag
  */
 export async function calculateRoute(from, to, profile = DEFAULT_ROUTING_PROFILE) {
@@ -357,7 +372,6 @@ export async function calculateRoute(from, to, profile = DEFAULT_ROUTING_PROFILE
     
     let coordinatesArray;
     let distance = 0;
-    let duration = 0;
     
     // Handle both GeoJSON and JSON response formats
     if (data.features && data.features.length > 0) {
@@ -365,7 +379,6 @@ export async function calculateRoute(from, to, profile = DEFAULT_ROUTING_PROFILE
       coordinatesArray = data.features[0].geometry.coordinates;
       const properties = data.features[0].properties || {};
       distance = properties.segments?.[0]?.distance || 0;
-      duration = properties.segments?.[0]?.duration || 0;
     } else if (data.routes && data.routes.length > 0) {
       // JSON format with encoded polyline
       const route = data.routes[0];
@@ -382,13 +395,11 @@ export async function calculateRoute(from, to, profile = DEFAULT_ROUTING_PROFILE
         throw new Error('Unexpected route geometry format');
       }
       
-      // Extract distance and duration from route summary or segments
+      // Extract distance from route summary or segments
       if (route.summary) {
         distance = route.summary.distance || 0;
-        duration = route.summary.duration || 0;
       } else if (route.segments && route.segments.length > 0) {
         distance = route.segments[0].distance || 0;
-        duration = route.segments[0].duration || 0;
       }
     } else {
       // No route data - this indicates no route found
@@ -402,8 +413,7 @@ export async function calculateRoute(from, to, profile = DEFAULT_ROUTING_PROFILE
     
     return {
       polyline,
-      distance,
-      duration
+      distance
     };
   } catch (error) {
     // Mark error if it indicates no route found
@@ -491,12 +501,19 @@ export async function calculateRouteSegments(waypoints, profile = DEFAULT_ROUTIN
     throw new Error('At least 2 waypoints are required');
   }
 
+  // Filter out non-geocoded waypoints - skip them as if they don't exist
+  const geocodedWaypoints = waypoints.filter(isWaypointGeocoded);
+  
+  if (geocodedWaypoints.length < 2) {
+    throw new Error('At least 2 geocoded waypoints are required');
+  }
+
   const segments = [];
   const errors = [];
   const adjustedWaypoints = [];
-  const totalSegments = waypoints.length - 1;
+  const totalSegments = geocodedWaypoints.length - 1;
   // Create a mutable copy of waypoints to allow adjustments
-  const workingWaypoints = waypoints.map(wp => ({ ...wp }));
+  const workingWaypoints = geocodedWaypoints.map(wp => ({ ...wp }));
 
   for (let i = 0; i < totalSegments; i++) {
     const from = workingWaypoints[i];
@@ -516,8 +533,7 @@ export async function calculateRouteSegments(waypoints, profile = DEFAULT_ROUTIN
         fromWaypointId: fromId,
         toWaypointId: toId,
         polyline: segmentData.polyline,
-        distance: segmentData.distance,
-        duration: segmentData.duration
+        distance: segmentData.distance
       });
     } catch (error) {
       // Check if this is a "no route" error that might benefit from fallback
@@ -572,8 +588,7 @@ export async function calculateRouteSegments(waypoints, profile = DEFAULT_ROUTIN
                 fromWaypointId: fromId,
                 toWaypointId: toId,
                 polyline: segmentData.polyline,
-                distance: segmentData.distance,
-                duration: segmentData.duration
+                distance: segmentData.distance
               });
               
               if (onProgress) {

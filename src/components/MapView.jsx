@@ -59,7 +59,7 @@ function FitBounds({ waypoints, segments, routePolyline }) {
  * @param {Object} props
  * @param {Array} props.waypoints - Array of waypoint objects {name, lat, lng, order, id}
  * @param {Array} props.routePolyline - Array of [lat, lng] coordinates for the route (backward compatibility)
- * @param {Array} props.segments - Array of segment objects {fromWaypointId, toWaypointId, polyline, distance, duration}
+ * @param {Array} props.segments - Array of segment objects {fromWaypointId, toWaypointId, polyline, distance}
  */
 export default function MapView({ waypoints = [], routePolyline = [], segments = [] }) {
   // Default center: Indian Himalayas region (around Manali)
@@ -85,26 +85,67 @@ export default function MapView({ waypoints = [], routePolyline = [], segments =
     '#84cc16'  // lime
   ];
 
-  // Create custom numbered marker icon
-  const createNumberedIcon = (number) => {
+  // Group waypoints by position so we can show all sequence numbers at shared locations
+  const positionKey = (lat, lng) => `${Number(lat).toFixed(5)}_${Number(lng).toFixed(5)}`;
+  const waypointsByPosition = (() => {
+    const geocoded = waypoints
+      .filter(wp => wp.lat !== 0 && wp.lng !== 0)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const map = new Map();
+    geocoded.forEach((wp, index) => {
+      const key = positionKey(wp.lat, wp.lng);
+      const seq = (wp.order !== undefined ? wp.order : index) + 1;
+      if (!map.has(key)) map.set(key, { waypoints: [], numbers: [] });
+      const entry = map.get(key);
+      if (!entry.numbers.includes(seq)) entry.numbers.push(seq);
+      entry.waypoints.push({ ...wp, sequenceNumber: seq });
+    });
+    return map;
+  })();
+
+  // Create custom numbered marker icon (single number or multiple numbers in a row)
+  const createNumberedIcon = (numbers) => {
+    const numList = Array.isArray(numbers) ? numbers : [numbers];
+    const isMulti = numList.length > 1;
+    const size = isMulti ? 24 : 28;
+    const gap = 4;
+    const totalWidth = isMulti ? numList.length * size + (numList.length - 1) * gap : size;
+    const html = isMulti
+      ? `<div style="display: flex; align-items: center; gap: ${gap}px; justify-content: center;">
+          ${numList.map(n => `<div style="
+            background-color: #3b82f6;
+            color: white;
+            width: ${size}px;
+            height: ${size}px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: ${size > 20 ? 12 : 14}px;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+          ">${n}</div>`).join('')}
+        </div>`
+      : `<div style="
+          background-color: #3b82f6;
+          color: white;
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: bold;
+          font-size: 14px;
+          border: 2px solid white;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        ">${numList[0]}</div>`;
     return L.divIcon({
       className: 'custom-numbered-marker',
-      html: `<div style="
-        background-color: #3b82f6;
-        color: white;
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-weight: bold;
-        font-size: 14px;
-        border: 2px solid white;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-      ">${number}</div>`,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14]
+      html,
+      iconSize: [totalWidth, size],
+      iconAnchor: [totalWidth / 2, size / 2]
     });
   };
 
@@ -268,38 +309,35 @@ export default function MapView({ waypoints = [], routePolyline = [], segments =
           )
         )}
 
-        {/* Display waypoint markers with sequence numbers */}
-        {waypoints
-          .filter(wp => wp.lat !== 0 && wp.lng !== 0)
-          .sort((a, b) => (a.order || 0) - (b.order || 0))
-          .map((waypoint, index) => {
-            // Use order + 1 for sequence number (order is 0-based)
-            const sequenceNumber = (waypoint.order !== undefined ? waypoint.order : index) + 1;
-            return (
-              <Marker
-                key={waypoint.id || `wp-${waypoint.order}-${index}`}
-                position={[waypoint.lat, waypoint.lng]}
-                icon={createNumberedIcon(sequenceNumber)}
-              >
-                <Popup>
-                  <div>
-                    <strong>{waypoint.name}</strong>
-                    <div style={{ fontSize: '0.85em', color: '#666', marginTop: '4px' }}>
-                      Waypoint {sequenceNumber}
-                    </div>
-                    {waypoint.display_name && waypoint.display_name !== waypoint.name && (
-                      <div style={{ fontSize: '0.85em', color: '#666', marginTop: '4px' }}>
-                        {waypoint.display_name}
-                      </div>
-                    )}
-                    <div style={{ fontSize: '0.85em', color: '#666', marginTop: '4px' }}>
-                      {waypoint.lat.toFixed(4)}, {waypoint.lng.toFixed(4)}
-                    </div>
+        {/* Display waypoint markers: one per unique position, with all sequence numbers at that position */}
+        {Array.from(waypointsByPosition.entries()).map(([key, { waypoints: wps, numbers }]) => {
+          const first = wps[0];
+          const names = [...new Set(wps.map(w => w.name))];
+          return (
+            <Marker
+              key={key}
+              position={[first.lat, first.lng]}
+              icon={createNumberedIcon(numbers)}
+            >
+              <Popup>
+                <div>
+                  <strong>{names.length === 1 ? names[0] : names.join(' / ')}</strong>
+                  <div style={{ fontSize: '0.85em', color: '#666', marginTop: '4px' }}>
+                    Waypoint {numbers.length === 1 ? numbers[0] : numbers.join(' & ')}
                   </div>
-                </Popup>
-              </Marker>
-            );
-          })}
+                  {first.display_name && first.display_name !== first.name && (
+                    <div style={{ fontSize: '0.85em', color: '#666', marginTop: '4px' }}>
+                      {first.display_name}
+                    </div>
+                  )}
+                  <div style={{ fontSize: '0.85em', color: '#666', marginTop: '4px' }}>
+                    {first.lat.toFixed(4)}, {first.lng.toFixed(4)}
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
       </MapContainer>
     </div>
   );

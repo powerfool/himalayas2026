@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { getRoute, saveRoute } from '../utils/storage';
 import { extractWaypointsWithRetry } from '../utils/anthropicService';
@@ -6,7 +6,12 @@ import { geocodeLocation, calculateRouteSegments, calculateRoute, DEFAULT_ROUTIN
 import RouteForm from './RouteForm';
 import WaypointEditor from './WaypointEditor';
 import MapView from './MapView';
+import TripDaysSection from './TripDaysSection';
+import TripCalendarStrip from './TripCalendarStrip';
 import AmbiguityResolution from './AmbiguityResolution';
+
+const AUTO_SAVE_DEBOUNCE_MS = 1500;
+const SAVED_STATUS_DURATION_MS = 2000;
 
 /**
  * RouteEditor component - Edit existing route or create new one
@@ -23,31 +28,139 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
   const [geocodingProgress, setGeocodingProgress] = useState({ current: 0, total: 0, message: null });
   const [ambiguityState, setAmbiguityState] = useState(null); // { waypointIndex, waypointName, candidates, isEditing }
   const [searchError, setSearchError] = useState(null); // Error message from search
+  const [segmentDays, setSegmentDays] = useState([]); // 1-based day per segment; segmentDays[i] >= segmentDays[i-1]
+  const [tripStartDate, setTripStartDate] = useState(null); // ISO date YYYY-MM-DD or null
+  const [dayNotes, setDayNotes] = useState({}); // { [dayNumber]: string } trip-day notes
+  const [rightPanelTab, setRightPanelTab] = useState('map'); // 'map' | 'calendar'
+  const [localRouteId, setLocalRouteId] = useState(null);
+  const [autoSaveStatus, setAutoSaveStatus] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
+  const lastSavedSnapshot = useRef(null);
+
+  // Enforce monotonicity: segmentDays[0] >= 1, segmentDays[i] >= segmentDays[i-1]
+  function sanitizeSegmentDays(days) {
+    if (!days || days.length === 0) return days;
+    const out = [...days];
+    out[0] = Math.max(1, out[0] ?? 1);
+    for (let i = 1; i < out.length; i++) {
+      out[i] = Math.max(out[i], out[i - 1]);
+    }
+    return out;
+  }
+
+  // Default segmentDays: new = sequential (1, 2, 3, ...); existing same length = sanitized; extend = last day
+  function defaultSegmentDays(segments, existingSegmentDays) {
+    if (!segments || segments.length === 0) return [];
+    if (existingSegmentDays && existingSegmentDays.length === segments.length) {
+      return sanitizeSegmentDays(existingSegmentDays);
+    }
+    const result = [];
+    for (let i = 0; i < segments.length; i++) {
+      if (existingSegmentDays && i < existingSegmentDays.length) {
+        result.push(existingSegmentDays[i]);
+      } else {
+        result.push(i + 1); // new: sequential days 1, 2, 3, ...
+      }
+    }
+    return sanitizeSegmentDays(result);
+  }
+
+  // Content-only shape for auto-save comparison (no createdAt/updatedAt)
+  function getRouteContent(effectiveId) {
+    return {
+      id: effectiveId,
+      name: routeName.trim(),
+      itineraryText: itineraryText.trim(),
+      waypoints,
+      routePolyline,
+      segments,
+      segmentDays,
+      tripStartDate: tripStartDate ?? null,
+      dayNotes: dayNotes && typeof dayNotes === 'object' ? dayNotes : {},
+    };
+  }
+
+  function buildRouteToSave(effectiveId, existingCreatedAt) {
+    const now = new Date().toISOString();
+    return {
+      ...getRouteContent(effectiveId),
+      createdAt: existingCreatedAt || now,
+      updatedAt: now,
+    };
+  }
 
   // Load route data when routeId changes
   useEffect(() => {
+    if (!routeId) {
+      setLocalRouteId(null);
+      lastSavedSnapshot.current = null;
+      setIsNewRoute(true);
+      return;
+    }
+
     const loadRouteAsync = async () => {
-      if (routeId) {
-        const route = await getRoute(routeId);
-        if (route) {
-          setRouteName(route.name || '');
-          setItineraryText(route.itineraryText || '');
-          setWaypoints(route.waypoints || []);
-          setRoutePolyline(route.routePolyline || []); // Backward compatibility
-          setSegments(route.segments || []);
-          setIsNewRoute(false);
-        } else {
-          setError('Route not found');
-          setIsNewRoute(true);
-        }
+      const route = await getRoute(routeId);
+      if (route) {
+        setRouteName(route.name || '');
+        setItineraryText(route.itineraryText || '');
+        setWaypoints(route.waypoints || []);
+        setRoutePolyline(route.routePolyline || []); // Backward compatibility
+        const segs = route.segments || [];
+        setSegments(segs);
+        const segDays = defaultSegmentDays(segs, route.segmentDays ? sanitizeSegmentDays(route.segmentDays) : undefined);
+        setSegmentDays(segDays);
+        setTripStartDate(route.tripStartDate ?? null);
+        setDayNotes(route.dayNotes && typeof route.dayNotes === 'object' ? route.dayNotes : {});
+        setIsNewRoute(false);
+        lastSavedSnapshot.current = JSON.stringify({
+          id: route.id,
+          name: route.name || '',
+          itineraryText: route.itineraryText || '',
+          waypoints: route.waypoints || [],
+          routePolyline: route.routePolyline || [],
+          segments: segs,
+          segmentDays: segDays,
+          tripStartDate: route.tripStartDate ?? null,
+          dayNotes: route.dayNotes && typeof route.dayNotes === 'object' ? route.dayNotes : {},
+        });
       } else {
-        // New route - initialize with empty UUID
+        setError('Route not found');
         setIsNewRoute(true);
+        lastSavedSnapshot.current = null;
       }
     };
-    
+
     loadRouteAsync();
   }, [routeId]);
+
+  // Auto-save: debounced persist when route content changes
+  useEffect(() => {
+    if (!routeName.trim()) return;
+
+    const timer = setTimeout(async () => {
+      let effectiveId = routeId || localRouteId;
+      if (!effectiveId) effectiveId = uuidv4();
+      const content = getRouteContent(effectiveId);
+      const snapshot = JSON.stringify(content);
+      if (lastSavedSnapshot.current === snapshot) return;
+
+      if (!localRouteId && !routeId) setLocalRouteId(effectiveId);
+
+      setAutoSaveStatus('saving');
+      try {
+        const existingRoute = await getRoute(effectiveId);
+        const routeToSave = buildRouteToSave(effectiveId, existingRoute?.createdAt);
+        await saveRoute(routeToSave);
+        lastSavedSnapshot.current = snapshot;
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus('idle'), SAVED_STATUS_DURATION_MS);
+      } catch (err) {
+        console.error('Auto-save failed:', err);
+        setAutoSaveStatus('error');
+      }
+    }, AUTO_SAVE_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [routeName, itineraryText, waypoints, segments, segmentDays, tripStartDate, dayNotes, routePolyline, routeId, localRouteId]);
 
   const handleParseItinerary = async () => {
     if (!itineraryText.trim()) {
@@ -526,7 +639,16 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
    * @param {number} changedWaypointIndex - Index of the waypoint that was changed
    */
   const handleRecalculateAffectedSegments = async (changedWaypointIndex) => {
-    const geocodedWaypoints = waypoints.filter(wp => wp.lat !== 0 && wp.lng !== 0);
+    // Filter out non-geocoded waypoints - skip them as if they don't exist
+    const geocodedWaypoints = waypoints.filter(wp => 
+      wp && 
+      typeof wp.lat === 'number' && 
+      typeof wp.lng === 'number' &&
+      wp.lat !== 0 && 
+      wp.lng !== 0 &&
+      !isNaN(wp.lat) && 
+      !isNaN(wp.lng)
+    );
     
     if (geocodedWaypoints.length < 2) {
       setError('At least 2 geocoded waypoints are required');
@@ -592,8 +714,7 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
             fromWaypointId: fromId,
             toWaypointId: toId,
             polyline: segmentData.polyline,
-            distance: segmentData.distance,
-            duration: segmentData.duration
+            distance: segmentData.distance
           };
 
           if (segmentIndex >= 0) {
@@ -634,7 +755,16 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
   };
 
   const handleCalculateRoute = async () => {
-    const geocodedWaypoints = waypoints.filter(wp => wp.lat !== 0 && wp.lng !== 0);
+    // Filter out non-geocoded waypoints - skip them as if they don't exist
+    const geocodedWaypoints = waypoints.filter(wp => 
+      wp && 
+      typeof wp.lat === 'number' && 
+      typeof wp.lng === 'number' &&
+      wp.lat !== 0 && 
+      wp.lng !== 0 &&
+      !isNaN(wp.lat) && 
+      !isNaN(wp.lng)
+    );
     
     if (geocodedWaypoints.length < 2) {
       setError('At least 2 geocoded waypoints are required to calculate a route');
@@ -703,14 +833,15 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
       }
 
       setSegments(routeSegments);
-      
+      setSegmentDays(prev => defaultSegmentDays(routeSegments, prev));
+
       // Generate combined polyline for backward compatibility
       const combinedPolyline = routeSegments.flatMap(segment => segment.polyline);
       setRoutePolyline(combinedPolyline);
-      
+
       setLoading(false);
       setGeocodingProgress({ current: 0, total: 0, message: null });
-      
+
       if (routeSegments.length < geocodedWaypoints.length - 1) {
         setError(`Warning: Only ${routeSegments.length} of ${geocodedWaypoints.length - 1} segments calculated successfully. Some segments may be missing.`);
       } else {
@@ -741,23 +872,14 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
     setError(null);
 
     try {
-      // Get existing route to preserve createdAt if updating
-      const existingRoute = routeId ? await getRoute(routeId) : null;
-      
-      const routeToSave = {
-        id: routeId || uuidv4(),
-        name: routeName.trim(),
-        itineraryText: itineraryText.trim(),
-        waypoints: waypoints,
-        routePolyline: routePolyline, // Keep for backward compatibility
-        segments: segments,
-        createdAt: existingRoute?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
+      const effectiveId = routeId || localRouteId || uuidv4();
+      const existingRoute = routeId ? await getRoute(routeId) : (localRouteId ? await getRoute(localRouteId) : null);
+      const routeToSave = buildRouteToSave(effectiveId, existingRoute?.createdAt);
 
       await saveRoute(routeToSave);
+      lastSavedSnapshot.current = JSON.stringify(getRouteContent(effectiveId));
       setLoading(false);
-      
+
       if (onSave) {
         onSave(routeToSave);
       }
@@ -769,6 +891,31 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+      {/* Auto-save indicator: fixed top-right, visible at all times */}
+      {autoSaveStatus !== 'idle' && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '12px',
+            right: '12px',
+            zIndex: 1000,
+            padding: '6px 12px',
+            borderRadius: '6px',
+            fontSize: '13px',
+            fontWeight: 500,
+            backgroundColor: 'white',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+            border: '1px solid #e5e7eb',
+            color:
+              autoSaveStatus === 'saving' ? '#6b7280' :
+              autoSaveStatus === 'saved' ? '#059669' : '#dc2626',
+          }}
+        >
+          {autoSaveStatus === 'saving' && 'Saving…'}
+          {autoSaveStatus === 'saved' && 'Saved'}
+          {autoSaveStatus === 'error' && 'Error saving'}
+        </div>
+      )}
       {/* Left Panel - Editor */}
       <div style={{ 
         width: '400px', 
@@ -777,23 +924,25 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
         borderRight: '1px solid #e5e7eb',
         backgroundColor: '#f9fafb'
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2>{isNewRoute ? 'New Route' : 'Edit Route'}</h2>
-          <button
-            onClick={onCancel}
-            style={{
-              padding: '6px 12px',
-              backgroundColor: '#6b7280',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '14px'
-            }}
-          >
-            Cancel
-          </button>
-        </div>
+        {rightPanelTab !== 'calendar' && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <h2 style={{ margin: 0 }}>{isNewRoute ? 'New Route' : 'Edit Route'}</h2>
+            <button
+              onClick={onCancel}
+              style={{
+                padding: '6px 12px',
+                backgroundColor: '#6b7280',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '14px'
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
 
         {error && (
           <div style={{
@@ -808,102 +957,178 @@ export default function RouteEditor({ routeId, onSave, onCancel }) {
           </div>
         )}
 
-        <RouteForm
-          routeName={routeName}
-          itineraryText={itineraryText}
-          onRouteNameChange={setRouteName}
-          onItineraryTextChange={setItineraryText}
-          onParseItinerary={handleParseItinerary}
-          loading={loading}
-        />
+        {rightPanelTab !== 'calendar' && (
+          <>
+            <RouteForm
+              routeName={routeName}
+              itineraryText={itineraryText}
+              onRouteNameChange={setRouteName}
+              onItineraryTextChange={setItineraryText}
+              onParseItinerary={handleParseItinerary}
+              loading={loading}
+            />
 
-        <WaypointEditor
-          waypoints={waypoints}
-          onWaypointsChange={setWaypoints}
-          onGeocodeWaypoint={handleGeocodeSingleWaypoint}
-          onEditWaypoint={handleEditWaypoint}
-          isGeocoding={loading}
-        />
+            <WaypointEditor
+              waypoints={waypoints}
+              onWaypointsChange={setWaypoints}
+              onGeocodeWaypoint={handleGeocodeSingleWaypoint}
+              onEditWaypoint={handleEditWaypoint}
+              isGeocoding={loading}
+            />
 
-        <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <button
-            onClick={handleGeocodeWaypoints}
-            disabled={loading || waypoints.filter(wp => wp.lat === 0 && wp.lng === 0).length === 0}
-            style={{
-              padding: '10px',
-              backgroundColor: waypoints.filter(wp => wp.lat === 0 && wp.lng === 0).length === 0 ? '#d1d5db' : '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: waypoints.filter(wp => wp.lat === 0 && wp.lng === 0).length === 0 ? 'not-allowed' : 'pointer',
-              fontSize: '14px'
-            }}
-          >
-            {loading && geocodingProgress.total > 0 
-              ? `Geocoding... (${geocodingProgress.current}/${geocodingProgress.total})`
-              : 'Geocode Waypoints'}
-          </button>
+            <div style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <button
+                onClick={handleGeocodeWaypoints}
+                disabled={loading || waypoints.filter(wp => wp.lat === 0 && wp.lng === 0).length === 0}
+                style={{
+                  padding: '10px',
+                  backgroundColor: waypoints.filter(wp => wp.lat === 0 && wp.lng === 0).length === 0 ? '#d1d5db' : '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: waypoints.filter(wp => wp.lat === 0 && wp.lng === 0).length === 0 ? 'not-allowed' : 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                {loading && geocodingProgress.total > 0 
+                  ? `Geocoding... (${geocodingProgress.current}/${geocodingProgress.total})`
+                  : 'Geocode Waypoints'}
+              </button>
 
-          <button
-            onClick={handleCalculateRoute}
-            disabled={loading || waypoints.filter(wp => wp.lat !== 0 && wp.lng !== 0).length < 2}
-            style={{
-              padding: '10px',
-              backgroundColor: waypoints.filter(wp => wp.lat !== 0 && wp.lng !== 0).length < 2 ? '#d1d5db' : '#10b981',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: waypoints.filter(wp => wp.lat !== 0 && wp.lng !== 0).length < 2 ? 'not-allowed' : 'pointer',
-              fontSize: '14px'
-            }}
-          >
-            {loading && geocodingProgress.total > 0
-              ? (geocodingProgress.message || `Calculating... (${geocodingProgress.current}/${geocodingProgress.total} segments)`)
-              : segments.length > 0
-              ? `Recalculate Route (${segments.length} segments)`
-              : 'Calculate Route'}
-          </button>
-          
-          {segments.length > 0 && !loading && (
-            <div style={{
-              marginTop: '8px',
-              padding: '8px',
-              backgroundColor: '#d1fae5',
-              color: '#065f46',
-              borderRadius: '4px',
-              fontSize: '12px'
-            }}>
-              ✓ Route calculated: {segments.length} segment{segments.length !== 1 ? 's' : ''} displayed on map
+              <button
+                onClick={handleCalculateRoute}
+                disabled={loading || waypoints.filter(wp => wp.lat !== 0 && wp.lng !== 0).length < 2}
+                style={{
+                  padding: '10px',
+                  backgroundColor: waypoints.filter(wp => wp.lat !== 0 && wp.lng !== 0).length < 2 ? '#d1d5db' : '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: waypoints.filter(wp => wp.lat !== 0 && wp.lng !== 0).length < 2 ? 'not-allowed' : 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                {loading && geocodingProgress.total > 0
+                  ? (geocodingProgress.message || `Calculating... (${geocodingProgress.current}/${geocodingProgress.total} segments)`)
+                  : segments.length > 0
+                  ? `Recalculate Route (${segments.length} segments)`
+                  : 'Calculate Route'}
+              </button>
+              
+              {segments.length > 0 && !loading && (
+                <div style={{
+                  marginTop: '8px',
+                  padding: '8px',
+                  backgroundColor: '#d1fae5',
+                  color: '#065f46',
+                  borderRadius: '4px',
+                  fontSize: '12px'
+                }}>
+                  ✓ Route calculated: {segments.length} segment{segments.length !== 1 ? 's' : ''} displayed on map
+                </div>
+              )}
             </div>
+          </>
+        )}
+
+        <div style={{ marginTop: rightPanelTab === 'calendar' ? 0 : '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {rightPanelTab === 'calendar' && (
+            <TripDaysSection
+              segments={segments}
+              waypoints={waypoints}
+              segmentDays={segmentDays}
+              tripStartDate={tripStartDate}
+              onSegmentDaysChange={setSegmentDays}
+              onTripStartDateChange={setTripStartDate}
+            />
           )}
 
-          <button
-            onClick={handleSave}
-            disabled={loading}
-            style={{
-              padding: '12px',
-              backgroundColor: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              fontSize: '16px',
-              fontWeight: 'bold',
-              marginTop: '8px'
-            }}
-          >
-            {loading ? 'Processing...' : 'Save Route'}
-          </button>
+          {rightPanelTab === 'map' && (
+            <button
+              onClick={handleSave}
+              disabled={loading}
+              style={{
+                padding: '12px',
+                backgroundColor: '#3b82f6',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                fontSize: '16px',
+                fontWeight: 'bold',
+                marginTop: '8px'
+              }}
+            >
+              {loading ? 'Processing...' : 'Save Route'}
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Right Panel - Map */}
-      <div style={{ flex: 1, position: 'relative' }}>
-        <MapView
-          waypoints={waypoints}
-          routePolyline={routePolyline}
-          segments={segments}
-        />
+      {/* Right Panel - Map | Calendar */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <div style={{
+          display: 'flex',
+          gap: '4px',
+          padding: '8px 12px',
+          borderBottom: '1px solid #e5e7eb',
+          backgroundColor: '#f9fafb'
+        }}>
+          <button
+            onClick={() => setRightPanelTab('map')}
+            style={{
+              padding: '6px 12px',
+              border: '1px solid #e5e7eb',
+              borderRadius: '4px',
+              backgroundColor: rightPanelTab === 'map' ? '#3b82f6' : 'white',
+              color: rightPanelTab === 'map' ? 'white' : '#374151',
+              cursor: 'pointer',
+              fontSize: '14px'
+            }}
+          >
+            Map
+          </button>
+          <button
+            onClick={() => setRightPanelTab('calendar')}
+            style={{
+              padding: '6px 12px',
+              border: '1px solid #e5e7eb',
+              borderRadius: '4px',
+              backgroundColor: rightPanelTab === 'calendar' ? '#3b82f6' : 'white',
+              color: rightPanelTab === 'calendar' ? 'white' : '#374151',
+              cursor: 'pointer',
+              fontSize: '14px'
+            }}
+          >
+            Calendar
+          </button>
+        </div>
+        <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
+          {rightPanelTab === 'map' ? (
+            <MapView
+              waypoints={waypoints}
+              routePolyline={routePolyline}
+              segments={segments}
+            />
+          ) : (
+            <TripCalendarStrip
+              segments={segments}
+              waypoints={waypoints}
+              segmentDays={segmentDays}
+              tripStartDate={tripStartDate}
+              dayNotes={dayNotes}
+              onDayNotesChange={(dayNumber, text) => {
+                const key = String(dayNumber);
+                setDayNotes((prev) => {
+                  const next = { ...prev };
+                  if (text == null || text.trim() === '') delete next[key];
+                  else next[key] = text.trim();
+                  return next;
+                });
+              }}
+            />
+          )}
+        </div>
       </div>
 
       {/* Ambiguity Resolution Modal */}
